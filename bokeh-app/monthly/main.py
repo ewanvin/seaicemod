@@ -169,9 +169,12 @@ class SeaIceAnalysis(param.Parameterized):
                             scenario_color = self.color_palette[color_index % len(self.color_palette)]
                             color_index += 1
 
+                            # Set line dash style for 'SON'
+                            line_dash = 'dashed' if season == 'SON' else 'solid'
+
 
                             # Plot the seasonal MODEL data
-                            point = self.figure.line(season_dates, season_values, legend_label=f'{model} - {scenario} {season}', line_width=2, color=scenario_color) #, size=5, color='navy', alpha=0.5)
+                            point = self.figure.line(season_dates, season_values, legend_label=f'{model} - {scenario} {season}', line_width=2, color=scenario_color, line_dash=line_dash)
                             legend_items.append(LegendItem(label=f'{model} - {scenario} {season}', renderers=[point]))
 
 
