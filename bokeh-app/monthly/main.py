@@ -16,6 +16,8 @@ from bokeh.palettes import viridis, cividis, plasma, Category10
 from bokeh.colors import RGB
 from bokeh.transform import linear_cmap
 import xarray as xr
+import numpy as np 
+import pandas as pd
 
 # Specify a loading spinner wheel to display when data is being loaded
 pn.extension(loading_spinner='dots', loading_color='#696969')
@@ -56,7 +58,7 @@ color_groups = {
 class SeaIceAnalysis(param.Parameterized):
     color_scale_selector = param.Selector(objects=list(color_groups['Sequential color maps'].keys()) + list(color_groups['Non-sequential color maps'].keys()), default='Viridis')
     variable = param.Selector(objects=['siarean', 'siextentn'], default='siarean')
-    temporal_resolution = param.Selector(objects=['Monthly', 'Daily'], default='Monthly')
+    temporal_resolution = param.Selector(objects=['Monthly', 'Daily', 'Seasonal'], default='Monthly')
     models = param.ListSelector(objects=[
         'NorESM2-LM_sea_ice', 
         'MRI-ESM2-0_sea_ice', 
@@ -111,7 +113,7 @@ class SeaIceAnalysis(param.Parameterized):
         legend_items = []
 
         # Plot the constant dataset
-        line = self.figure.line(self.constant_time, self.constant_values, legend_label="Osisaf", line_width=2, color="black")#, line_dash="dashed")
+        line = self.figure.line(self.constant_time, self.constant_values, legend_label="Osisaf", line_width=2, color="black")
         legend_items.append(LegendItem(label="Osisaf", renderers=[line]))
 
         color_index = 0
@@ -119,79 +121,80 @@ class SeaIceAnalysis(param.Parameterized):
             for scenario_index, scenario in enumerate(self.scenarios):
                 try:
                     # Download and extract data
-                    self.data_info = tk.download_and_extract_data(self.variable, model, self.temporal_resolution, scenario)
+                    self.data_info = tk.download_and_extract_data(self.variable, model, 'Monthly', scenario) #self.temporal_resolution,
                     if self.data_info is None:
                         raise ValueError("Data could not be loaded.")
                     
-                    da = self.data_info['da']
-                    print(da)
-                    time = da.time.values
-                    print(time)
-                    values = da.values
-                    
+
                     # Get color for the model and scenario
                     scenario_color = self.color_palette[color_index % len(self.color_palette)]
                     color_index += 1
+
+                    # Set xr.DataArray
+                    da = self.data_info['da']
+                    
+                    #TODO clunky solution for OSISAF and color scheme
+                    if self.temporal_resolution == 'Seasonal':
+                        # Removing OSISAF data
+                        line.visible = False
+
+                        # Define seasons and their corresponding months
+                        season_to_month = {
+                            'DJF': 1,  # January
+                            #'MAM': 4,  # April
+                            #'JJA': 7,  # July
+                            'SON': 10  # October
+                        }
+                        
+                    
+                        # Group by year and season, and calculate mean MODEL data
+                        da.coords['year'] = da.time.dt.year
+                        da.coords['season'] = da.time.dt.season
+                        season_mean = da.groupby(['year', 'season']).mean()
+
+                        # Prepare data for plotting
+                        for season, month in season_to_month.items():                          
+                            season_values = season_mean.sel(season=season).values
+                            season_years = season_mean.sel(season=season).year.values
+                            season_dates = [pd.Timestamp(year=int(year), month=month, day=1) for year in season_years]
+
+                            # Convert season dates to datetime objects
+                            season_dates = pd.to_datetime(season_dates, format='%Y-%b-%d')
+
+                            # Ensure the data is 1D for each season
+                            if season_values.ndim > 1 and season_values.shape[1] > 1:
+                                season_values = season_values[:,0]
+
+                            # Assign a distinct color for each model-scenario-season combination
+                            scenario_color = self.color_palette[color_index % len(self.color_palette)]
+                            color_index += 1
+
+
+                            # Plot the seasonal MODEL data
+                            point = self.figure.line(season_dates, season_values, legend_label=f'{model} - {scenario} {season}', line_width=2, color=scenario_color) #, size=5, color='navy', alpha=0.5)
+                            legend_items.append(LegendItem(label=f'{model} - {scenario} {season}', renderers=[point]))
+
+
+                    else:
+                        time = da.time.values
+                        values = da.values
+                                       
                     
                     line = self.figure.line(time, values, legend_label=f"{model} - {scenario}", line_width=2, color=scenario_color)
                     legend_items.append(LegendItem(label=f"{model} - {scenario}", renderers=[line]))
-
-                    """
-                    # Calculate percentiles and median
-                    percentile_data = tk.calculate_percentiles_and_median(da)
-                                                      
-                    #print(f"day_of_year: {percentile_data['cds_percentile_2575']['day_of_year']}")
-                    #print(f"percentile_25: {percentile_data['cds_percentile_2575']['percentile_25']}")
-                    #print(f"percentile_75: {percentile_data['cds_percentile_2575']['percentile_75']}")
-
-
-                    varea = self.figure.varea(x='day_of_year',
-                                      y1='percentile_25',
-                                      y2='percentile_75',
-                                      source=percentile_data['cds_percentile_2575'],
-                                      fill_alpha=0.6,
-                                      fill_color='gray'  
-                                      )
-                                      
-                    
-                    legend_items.append(LegendItem(label=f"{model} - {scenario} (25-75 percentile)", renderers=[varea]))
-                    """
-
-                    """
-                    # Calculate min/max 
-                    min_max_data = tk.calculate_min_max(da)
-
-                    min_line = self.figure.line(x='day_of_year',
-                                                y='minimum',
-                                                source=min_max_data['cds_minimum']
-                    )
-
-                    max_line = self.figure.line(x='day_of_year',
-                                                y='maximum',
-                                                source=min_max_data['cds_maximum']
-                    )
-
-                    legend_items.append(LegendItem(label=f"{model} - {scenario} minimum", renderers=[min_line]))
-                    legend_items.append(LegendItem(label=f"{model} - {scenario} maximum", renderers=[max_line]))
-
-                    """
-                    #Monthly, seasonal, yearly resolution
-
-
-
-
                     
                     
                 except Exception as e:
                     logging.error(f"An error occurred while processing {model} - {scenario}: {e}")
     
         # Create a new legend with the updated items
-        self.figure.legend.items = legend_items
-        self.figure.legend.title = "Legend"
-        self.figure.legend.location = "bottom_left"
-        self.figure.legend.click_policy = "hide"
-        self.figure.legend.label_text_font_size = "10pt"
-        self.figure.legend.background_fill_alpha = 0
+        if self.figure.renderers:
+            self.figure.legend.items = legend_items
+            self.figure.legend.title = "Legend"
+            self.figure.legend.location = "bottom_left"
+            self.figure.legend.click_policy = "hide"
+            self.figure.legend.label_text_font_size = "10pt"
+            self.figure.legend.background_fill_alpha = 0
     
 
     def view(self):
