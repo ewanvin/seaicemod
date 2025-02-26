@@ -58,7 +58,7 @@ color_groups = {
 class SeaIceAnalysis(param.Parameterized):
     color_scale_selector = param.Selector(objects=list(color_groups['Sequential color maps'].keys()) + list(color_groups['Non-sequential color maps'].keys()), default='Viridis')
     variable = param.Selector(objects=['siarean', 'siextentn'], default='siarean')
-    temporal_resolution = param.Selector(objects=['Monthly', 'Daily', 'Seasonal'], default='Monthly')
+    temporal_resolution = param.Selector(objects=['Monthly', 'Daily', 'Seasonal', 'Yearly'], default='Monthly')
     models = param.ListSelector(objects=[
         'NorESM2-LM_sea_ice', 
         'MRI-ESM2-0_sea_ice', 
@@ -134,32 +134,32 @@ class SeaIceAnalysis(param.Parameterized):
 
                     # Set xr.DataArray
                     da = self.data_info['da']
+
+
+                    # Define seasons and their corresponding months
+                    season_to_month = {
+                        'DJF': 1,  # January
+                        #'MAM': 4,  # April
+                        #'JJA': 7,  # July
+                        'SON': 10  # October
+                    }
                     
-                    #TODO clunky solution for OSISAF and color scheme atm.
+                    # Group by year and season, and calculate mean OSISAF data 
+                    osisaf = self.constant_dataset.copy()
+                    #print(osisaf)
+                    osisaf.coords['year'] = osisaf.time.dt.year
+                    osisaf.coords['season'] = osisaf.time.dt.season
+                    osisaf_season_mean = osisaf['sia'].groupby(['year','season']).mean()
+
+
+                    # Group by year and season, and calculate mean MODEL data
+                    da.coords['year'] = da.time.dt.year
+                    da.coords['season'] = da.time.dt.season
+                    season_mean = da.groupby(['year', 'season']).mean()
+                                        
                     if self.temporal_resolution == 'Seasonal':
                         # Removing OSISAF data
                         line.visible = False
-
-                        # Define seasons and their corresponding months
-                        season_to_month = {
-                            'DJF': 1,  # January
-                            #'MAM': 4,  # April
-                            #'JJA': 7,  # July
-                            'SON': 10  # October
-                        }
-                        
-                        # Group by year and season, and calculate mean OSISAF data 
-                        osisaf = self.constant_dataset.copy()
-                        #print(osisaf)
-                        osisaf.coords['year'] = osisaf.time.dt.year
-                        osisaf.coords['season'] = osisaf.time.dt.season
-                        osisaf_season_mean = osisaf['sia'].groupby(['year','season']).mean()
-
-
-                        # Group by year and season, and calculate mean MODEL data
-                        da.coords['year'] = da.time.dt.year
-                        da.coords['season'] = da.time.dt.season
-                        season_mean = da.groupby(['year', 'season']).mean()
 
                         # Prepare data for plotting
                         for season, month in season_to_month.items():   
@@ -200,6 +200,34 @@ class SeaIceAnalysis(param.Parameterized):
                             legend_items.append(LegendItem(label=f'{model} - {scenario} {season}', renderers=[point]))
 
 
+                    elif self.temporal_resolution == 'Yearly':
+                        # Removing OSISAF data from the original line plot
+                        line.visible = False
+                        
+                        # Resampling to yearly resolution
+                        yearly_osi_sia = self.constant_dataset['sia'].resample(time='YE').mean()
+                        yearly_da = da.resample(time='YE').mean()
+
+                        # Exclude the last value from yearly_osi_sia 
+                        yearly_osi_sia = yearly_osi_sia[:-1]
+
+                        # Ensure the data is 1D for each year
+                        if yearly_da.ndim > 1 and yearly_da.shape[1] > 1:
+                            yearly_da = yearly_da[:, 0]
+
+                        # Plotting yearly OSISAF data (only add legend once)
+                        if 'Yearly OSISAF' not in added_osisaf_legends:
+                            osi_yearly = self.figure.line(yearly_osi_sia.time, yearly_osi_sia.values, legend_label='Yearly OSISAF', line_width=3, color='black')
+                            legend_items.append(LegendItem(label='Yearly OSISAF', renderers=[osi_yearly]))
+                            added_osisaf_legends.add('Yearly OSISAF')
+
+                        
+                        # Plot the yearly MODEL data
+                        mod_yearly = self.figure.line(yearly_da.time, yearly_da.values, legend_label=f'{model} - {scenario} Yearly', line_width=2, color=scenario_color)
+                        legend_items.append(LegendItem(label=f'{model} - {scenario} Yearly', renderers=[mod_yearly]))
+
+                    
+
                     else:
                         time = da.time.values
                         values = da.values
@@ -215,7 +243,7 @@ class SeaIceAnalysis(param.Parameterized):
         # Create a new legend with the updated items
         if self.figure.renderers:
             self.figure.legend.items = legend_items
-            self.figure.legend.title = "Legend"
+            self.figure.legend.title = "Interactive legend"
             self.figure.legend.location = "bottom_left"
             self.figure.legend.click_policy = "hide"
             self.figure.legend.label_text_font_size = "10pt"
