@@ -111,6 +111,8 @@ class SeaIceAnalysis(param.Parameterized):
         self.figure.legend.items = []
 
         legend_items = []
+        added_osisaf_legends = set()  # Set to track added OSISAF legends
+
 
         # Plot the constant dataset
         line = self.figure.line(self.constant_time, self.constant_values, legend_label="Osisaf", line_width=2, color="black")
@@ -133,7 +135,7 @@ class SeaIceAnalysis(param.Parameterized):
                     # Set xr.DataArray
                     da = self.data_info['da']
                     
-                    #TODO clunky solution for OSISAF and color scheme
+                    #TODO clunky solution for OSISAF and color scheme atm.
                     if self.temporal_resolution == 'Seasonal':
                         # Removing OSISAF data
                         line.visible = False
@@ -146,14 +148,29 @@ class SeaIceAnalysis(param.Parameterized):
                             'SON': 10  # October
                         }
                         
-                    
+                        # Group by year and season, and calculate mean OSISAF data 
+                        osisaf = self.constant_dataset.copy()
+                        #print(osisaf)
+                        osisaf.coords['year'] = osisaf.time.dt.year
+                        osisaf.coords['season'] = osisaf.time.dt.season
+                        osisaf_season_mean = osisaf['sia'].groupby(['year','season']).mean()
+
+
                         # Group by year and season, and calculate mean MODEL data
                         da.coords['year'] = da.time.dt.year
                         da.coords['season'] = da.time.dt.season
                         season_mean = da.groupby(['year', 'season']).mean()
 
                         # Prepare data for plotting
-                        for season, month in season_to_month.items():                          
+                        for season, month in season_to_month.items():   
+                            #OSISAF
+                            osi_season_values = osisaf_season_mean.sel(season=season).values
+                            osi_season_years  = osisaf_season_mean.sel(season=season).year.values
+                            osi_season_dates  = [pd.Timestamp(year=int(year), month=month, day=1) for year in osi_season_years]
+
+                            osi_season_dates = pd.to_datetime(osi_season_dates, format='%Y-%b-%d') 
+                            
+                            # MODEL                        
                             season_values = season_mean.sel(season=season).values
                             season_years = season_mean.sel(season=season).year.values
                             season_dates = [pd.Timestamp(year=int(year), month=month, day=1) for year in season_years]
@@ -166,12 +183,17 @@ class SeaIceAnalysis(param.Parameterized):
                                 season_values = season_values[:,0]
 
                             # Assign a distinct color for each model-scenario-season combination
-                            scenario_color = self.color_palette[color_index % len(self.color_palette)]
-                            color_index += 1
+                            #scenario_color = self.color_palette[color_index % len(self.color_palette)]
+                            #color_index += 1
 
                             # Set line dash style for 'SON'
                             line_dash = 'dashed' if season == 'SON' else 'solid'
 
+                            # Plot the seasonal OSISAF data (only add legend once per season)
+                            if season not in added_osisaf_legends:
+                                osi_point = self.figure.line(osi_season_dates, osi_season_values, legend_label=f'OSISAF {season}', line_width=3, color='black', line_dash=line_dash)
+                                legend_items.append(LegendItem(label=f'OSISAF {season}', renderers=[osi_point]))
+                                added_osisaf_legends.add(season)
 
                             # Plot the seasonal MODEL data
                             point = self.figure.line(season_dates, season_values, legend_label=f'{model} - {scenario} {season}', line_width=2, color=scenario_color, line_dash=line_dash)
