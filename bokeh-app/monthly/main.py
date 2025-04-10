@@ -69,6 +69,11 @@ class SeaIceAnalysis(param.Parameterized):
         default=['NorESM2-LM_sea_ice'])
     scenarios = param.ListSelector(objects=ssp_scenarios, default=['ssp126'])
     
+    # Add selection of months when selecting Seasonal reso
+    #season_months = param.ListSelector(objects=['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'], default=['January', 'February', 'March'])
+    season_months = param.ListSelector(objects=['DJF','MAM','JJA','SON'], default=['DJF'])
+
+
     def __init__(self, **params):
         super().__init__(**params)
         self.data_info = None
@@ -86,6 +91,12 @@ class SeaIceAnalysis(param.Parameterized):
         self.constant_values = self.constant_dataset['sia'].values
 
 
+        self.season_months_widget = pn.Param(self.param.season_months, widgets={'season_months': pn.widgets.CheckBoxGroup})
+        self.update_season_selector_visibility()
+        self.update_plot() # Initialize the plot with default parameters
+
+
+
     @param.depends('color_scale_selector', watch=True)
     def update_color_palette(self):
         selected_palette = self.color_scale_selector
@@ -101,7 +112,7 @@ class SeaIceAnalysis(param.Parameterized):
     
 
 
-    @param.depends('variable', 'models', 'temporal_resolution', 'scenarios', 'color_scale_selector', watch=True)
+    @param.depends('variable', 'models', 'temporal_resolution', 'scenarios', 'color_scale_selector', 'season_months', watch=True)
     def update_plot(self):
         # Update the color palette based on the selected color scale
         self.update_color_palette()
@@ -135,14 +146,6 @@ class SeaIceAnalysis(param.Parameterized):
                     # Set xr.DataArray
                     da = self.data_info['da']
 
-
-                    # Define seasons and their corresponding months
-                    season_to_month = {
-                        'DJF': 1,  # January
-                        #'MAM': 4,  # April
-                        #'JJA': 7,  # July
-                        'SON': 10  # October
-                    }
                     
                     # Group by year and season, and calculate mean OSISAF data 
                     osisaf = self.constant_dataset.copy()
@@ -157,48 +160,68 @@ class SeaIceAnalysis(param.Parameterized):
                     da.coords['season'] = da.time.dt.season
                     season_mean = da.groupby(['year', 'season']).mean()
                                         
+
                     if self.temporal_resolution == 'Seasonal':
-                        # Removing OSISAF data
+                        # Define season-to-month mapping
+                        season_to_months = {
+                            'DJF': [12, 1, 2],
+                            'MAM': [3, 4, 5],
+                            'JJA': [6, 7, 8],
+                            'SON': [9, 10, 11]
+                        }
+                        season_to_line_dash = {
+                        'DJF': 'solid',
+                        'MAM': 'dotted',
+                        'JJA': 'dashdot',
+                        'SON': 'dotdash'
+                        }
+
+                        selected_seasons = self.season_months
+                        
+                        # Remove OSISAF data from the original line plot
                         line.visible = False
 
-                        # Prepare data for plotting
-                        for season, month in season_to_month.items():   
-                            #OSISAF
-                            osi_season_values = osisaf_season_mean.sel(season=season).values
-                            osi_season_years  = osisaf_season_mean.sel(season=season).year.values
-                            osi_season_dates  = [pd.Timestamp(year=int(year), month=month, day=1) for year in osi_season_years]
+                        for season in selected_seasons:
+                            months = season_to_months[season]
+                            line_dash = season_to_line_dash[season]
 
-                            osi_season_dates = pd.to_datetime(osi_season_dates, format='%Y-%b-%d') 
-                            
-                            # MODEL                        
-                            season_values = season_mean.sel(season=season).values
-                            season_years = season_mean.sel(season=season).year.values
-                            season_dates = [pd.Timestamp(year=int(year), month=month, day=1) for year in season_years]
+                            # Group by year and selected months, and calculate mean OSISAF data 
+                            osisaf = self.constant_dataset.copy()
+                            osisaf.coords['year'] = osisaf.time.dt.year
+                            osisaf.coords['month'] = osisaf.time.dt.month
+                            osisaf_selected_months_mean = osisaf['sia'].sel(time=osisaf.time.dt.month.isin(months)).groupby('year').mean()
 
-                            # Convert season dates to datetime objects
-                            season_dates = pd.to_datetime(season_dates, format='%Y-%b-%d')
+                            # Group by year and selected months, and calculate mean MODEL data
+                            da.coords['year'] = da.time.dt.year
+                            da.coords['month'] = da.time.dt.month
+                            selected_months_mean = da.sel(time=da.time.dt.month.isin(months)).groupby('year').mean()
+
+                            # Prepare data for plotting
+                            osi_season_values = osisaf_selected_months_mean.values
+                            osi_season_years = osisaf_selected_months_mean.year.values
+                            osi_season_dates = [pd.Timestamp(year=int(year), month=months[0], day=1) for year in osi_season_years]
+                            osi_season_dates = pd.to_datetime(osi_season_dates, format='%Y-%m-%d')
+
+                            season_values = selected_months_mean.values
+                            season_years = selected_months_mean.year.values
+                            season_dates = [pd.Timestamp(year=int(year), month=months[0], day=1) for year in season_years]
+                            season_dates = pd.to_datetime(season_dates, format='%Y-%m-%d')
 
                             # Ensure the data is 1D for each season
                             if season_values.ndim > 1 and season_values.shape[1] > 1:
-                                season_values = season_values[:,0]
+                                season_values = season_values[:, 0]
 
-                            # Assign a distinct color for each model-scenario-season combination
-                            #scenario_color = self.color_palette[color_index % len(self.color_palette)]
-                            #color_index += 1
-
-                            # Set line dash style for 'SON'
-                            line_dash = 'dashed' if season == 'SON' else 'solid'
-
-                            # Plot the seasonal OSISAF data (only add legend once per season)
-                            if season not in added_osisaf_legends:
+                            # Plot the seasonal OSISAF data (only add legend once)
+                            if f'Seasonal OSISAF {season}' not in added_osisaf_legends:
                                 osi_point = self.figure.line(osi_season_dates, osi_season_values, legend_label=f'OSISAF {season}', line_width=3, color='black', line_dash=line_dash)
                                 legend_items.append(LegendItem(label=f'OSISAF {season}', renderers=[osi_point]))
-                                added_osisaf_legends.add(season)
+                                added_osisaf_legends.add(f'Seasonal OSISAF {season}')
 
                             # Plot the seasonal MODEL data
                             point = self.figure.line(season_dates, season_values, legend_label=f'{model} - {scenario} {season}', line_width=2, color=scenario_color, line_dash=line_dash)
                             legend_items.append(LegendItem(label=f'{model} - {scenario} {season}', renderers=[point]))
-
+                            
+                
 
                     elif self.temporal_resolution == 'Yearly':
                         # Removing OSISAF data from the original line plot
@@ -243,28 +266,58 @@ class SeaIceAnalysis(param.Parameterized):
         # Create a new legend with the updated items
         if self.figure.renderers:
             self.figure.legend.items = legend_items
-            self.figure.legend.title = "Interactive legend"
+            self.figure.legend.title = "Legend"
             self.figure.legend.location = "bottom_left"
             self.figure.legend.click_policy = "hide"
             self.figure.legend.label_text_font_size = "10pt"
             self.figure.legend.background_fill_alpha = 0
     
 
-    def view(self):
-        # Create the widgets
-        return pn.Row( 
-            pn.Column(
-            pn.Param(self.param, widgets={
-                'color_scale_selector': pn.widgets.Select,
-                'variable': pn.widgets.Select,
-                'temporal_resolution': pn.widgets.Select,
-                'models': pn.widgets.CheckBoxGroup,
-                'scenarios': pn.widgets.CheckBoxGroup,
-            }),
-            ),
-            self.figure
-        )
+    @param.depends('temporal_resolution', watch=True)
+    def update_view(self):
+        self.view_pane = self.view()
+
     
+    @param.depends('temporal_resolution', watch=True)
+    def update_season_selector_visibility(self):
+        if self.temporal_resolution == 'Seasonal':
+            self.season_months_widget.visible = True
+        else:
+            self.season_months_widget.visible = False
+
+
+    def view(self):
+        
+        # Create the widgets
+        widgets = {
+            'color_scale_selector': pn.widgets.Select,
+            'variable': pn.widgets.Select,
+            'temporal_resolution': pn.widgets.Select,
+            'models': pn.widgets.CheckBoxGroup,
+            'scenarios': pn.widgets.CheckBoxGroup,
+            'season_months': pn.widgets.CheckBoxGroup,
+        }
+        
+                
+        # Add the widgets and the figure to the layout
+        widget_layout = pn.Column(
+            pn.pane.Markdown("### Color Scale Selector"),
+            pn.Param(self.param.color_scale_selector, widgets={'color_scale_selector': pn.widgets.Select}),
+            pn.pane.Markdown("### Variable"),
+            pn.Param(self.param.variable, widgets={'variable': pn.widgets.Select}),
+            pn.pane.Markdown("### Temporal Resolution"),
+            pn.Param(self.param.temporal_resolution, widgets={'temporal_resolution': pn.widgets.Select}),
+            pn.pane.Markdown("### Models"),
+            pn.Param(self.param.models, widgets={'models': pn.widgets.CheckBoxGroup}),
+            pn.pane.Markdown("### Scenarios"),
+            pn.Param(self.param.scenarios, widgets={'scenarios': pn.widgets.CheckBoxGroup}),
+            pn.pane.Markdown("### Season Selector"),
+            pn.Param(self.param.season_months, widgets={'season_months': pn.widgets.CheckBoxGroup})
+        )
+
+        return pn.Row(widget_layout, self.figure)
+
+        
 
 sea_ice_analysis = SeaIceAnalysis()
 pn.serve(sea_ice_analysis.view, title='Sea Ice Analysis')
