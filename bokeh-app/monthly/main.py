@@ -8,7 +8,8 @@ sys.path.append(os.path.join(app_root, 'bokeh-app'))
 
 import panel as pn
 from bokeh.plotting import figure
-from bokeh.models import HoverTool, Paragraph, LegendItem, Legend, DatetimeAxis, CustomJSHover, ColumnDataSource
+from bokeh.io import show
+from bokeh.models import HoverTool, Paragraph, LegendItem, Legend, DatetimeAxis, CustomJSHover, CustomJS, ColumnDataSource, Band, Button
 import logging
 import param
 import toolkit as tk
@@ -79,20 +80,38 @@ class SeaIceAnalysis(param.Parameterized):
     # Add selection of months when selecting Seasonal reso
     season_months = param.ListSelector(objects=['DJF','MAM','JJA','SON'], default=['DJF'])
 
+    # Adding statistics selector
+    #stats = param.ListSelector(objects=['Placeholder'], default=['Placeholder'])
+
 
     def __init__(self, **params):
         super().__init__(**params)
         self.data_info = None
-        self.figure = figure(title="Sea Ice Visualization Tool", x_axis_label='Year', y_axis_label='1e6 km2', x_axis_type='datetime')#, width=1500, height=800)
+        self.figure = figure(title="Sea Ice Visualization", x_axis_label='Year', y_axis_label='1e6 km2', x_axis_type='datetime')#, width=1500, height=800)
+        self.figure.title.text_font_size = "20pt"
         self.figure.ygrid.grid_line_color = 'black'
         self.figure.xgrid.grid_line_color = 'black'
+        self.figure.xaxis.axis_label_text_font_size = "20pt"
+        self.figure.yaxis.axis_label_text_font_size = "20pt"
         self.figure.ygrid.grid_line_alpha = 0.2
         self.figure.xgrid.grid_line_alpha = 0.2
         self.figure.sizing_mode = 'stretch_both'
 
         # Set the background color of the figure
-        self.figure.background_fill_color = '#e5ece9'
+        #self.figure.background_fill_color = '#e5ece9'
 
+
+        # Create buttons
+        self.model_info_button = pn.widgets.Button(name='Model Information', button_type='success')
+        self.scenario_info_button = pn.widgets.Button(name='Scenario Information', button_type='success')
+        self.variable_info_button = pn.widgets.Button(name='Variable Information', button_type='success')
+
+        self.model_info_button.on_click(self.show_model_info)
+        self.scenario_info_button.on_click(self.show_scenario_info)
+        self.variable_info_button.on_click(self.show_variable_info)
+
+
+        
 
         # Adding osisaf data
         self.constant_dataset = xr.open_dataset('https://thredds.met.no/thredds/dodsC/osisaf/met.no/ice/index/v2p2/nh/osisaf_nh_sia_monthly.nc')
@@ -143,129 +162,146 @@ class SeaIceAnalysis(param.Parameterized):
         color_index = 0
         for model_index, model in enumerate(self.models):
             for scenario_index, scenario in enumerate(self.scenarios):
-                try:
-                    # Use the actual variable name for data extraction
-                    self.data_info = tk.download_and_extract_data(actual_variable, model, 'Monthly', scenario)  
-                    
-                    if self.data_info is None:
-                        raise ValueError("Data could not be loaded.")
-
-                    # Get color for the model and scenario
-                    scenario_color = self.color_palette[color_index % len(self.color_palette)]
-                    color_index += 1
-
-                    # Set xr.DataArray
-                    da = self.data_info['da']
-
-                    # Define season-to-month mapping and line styles for plotting
-                    season_to_months = {
-                        'DJF': [12, 1, 2],
-                        'MAM': [3, 4, 5],
-                        'JJA': [6, 7, 8],
-                        'SON': [9, 10, 11]
-                    }
-                    season_to_line_dash = {
-                        'DJF': 'solid',
-                        'MAM': 'dotted',
-                        'JJA': 'dashdot',
-                        'SON': 'dotdash'
-                    }
-
-                    selected_seasons = self.season_months
-
-                    for season in selected_seasons:
-                        months = season_to_months[season]
-                        line_dash = season_to_line_dash[season]
-
-                        # Group by year and selected months, and calculate mean OSISAF data 
-                        osisaf = self.constant_dataset.copy()
-                        osisaf.coords['year'] = osisaf.time.dt.year
-                        osisaf.coords['month'] = osisaf.time.dt.month
-                        osisaf_selected_months_mean = osisaf['sia'].sel(time=osisaf.time.dt.month.isin(months)).groupby('year').mean()
-
-                        # Group by year and selected months, and calculate mean MODEL data
-                        da.coords['year'] = da.time.dt.year
-                        da.coords['month'] = da.time.dt.month
-                        selected_months_mean = da.sel(time=da.time.dt.month.isin(months)).groupby('year').mean()
-
-                        # Prepare data for plotting
-                        osi_season_values = osisaf_selected_months_mean.values
-                        osi_season_years = osisaf_selected_months_mean.year.values
-                        osi_season_dates = [pd.Timestamp(year=int(year), month=months[0], day=1) for year in osi_season_years]
-                        osi_season_dates = pd.to_datetime(osi_season_dates, format='%Y-%m-%d')
-
-                        season_values = selected_months_mean.values
-                        season_years = selected_months_mean.year.values
-                        season_dates = [pd.Timestamp(year=int(year), month=months[0], day=1) for year in season_years]
-                        season_dates = pd.to_datetime(season_dates, format='%Y-%m-%d')
-
-                        # Ensure the data is 1D for each season
-                        if season_values.ndim > 1 and season_values.shape[1] > 1:
-                            season_values = season_values[:, 0]
-
-                        # Plot the seasonal OSISAF data (only add legend once)
-                        if f'Seasonal OSISAF {season}' not in added_osisaf_legends:
-                            osi_point = self.figure.line(osi_season_dates, osi_season_values, legend_label=f'OSISAF {season}', line_width=3, color='black', line_dash=line_dash)
-                            legend_items.append(LegendItem(label=f'OSISAF {season}', renderers=[osi_point]))
-                            added_osisaf_legends.add(f'Seasonal OSISAF {season}')
-
-
-                        # Plot the seasonal MODEL data
-                        point = self.figure.line(season_dates, season_values, legend_label=f'{model} - {scenario} {season}', line_width=2, color=scenario_color, line_dash=line_dash)
-                        legend_items.append(LegendItem(label=f'{model} - {scenario} {season}', renderers=[point]))
-
-
-                        # Create a ColumnDataSource for each line
-                        source = ColumnDataSource(data={
-                            'date': season_dates,
-                            'value': season_values
-                        })
-
-                        # Define the hover tool with tooltips
-                        TOOLTIPS = '''
-                            <div>
-                                <div>
-                                    <span style="font-size: 12px; font-weight: bold">Date:</span>
-                                    <span style="font-size: 12px;">@date{%F}</span>
-                                </div>
-                                <div>
-                                    <span style="font-size: 12px; font-weight: bold">Value:</span>
-                                    <span style="font-size: 12px;">@value{0.000}</span>
-                                    <span style="font-size: 12px;">mill. km<sup>2</sup></span>
-                                </div>
-                            </div>
-                        '''
-
-                        # Add HoverTool to the figure
-                        hover_tool = HoverTool(tooltips=TOOLTIPS, formatters={'@date': 'datetime'})
-                        self.figure.add_tools(hover_tool)
-
-                        # Plot the seasonal MODEL data with the hover tool
-                        point = self.figure.line(
-                            'date', 'value', source=source,
-                            legend_label=f'{model} - {scenario} {season}',
-                            line_width=2, color=scenario_color, line_dash=line_dash
-                        )
-
-                        legend_items.append(LegendItem(label=f'{model} - {scenario} {season}', renderers=[point]))
-
-
-
-
-                except Exception as e:
-                    logging.error(f"An error occurred while processing {model} - {scenario}: {e}")
-
-
+                # Use the actual variable name for data extraction
+                self.data_info = tk.download_and_extract_data(actual_variable, model, 'Monthly', scenario)  
                 
+                if self.data_info is None:
+                    raise ValueError("Data could not be loaded.")
+
+                # Get color for the model and scenario
+                scenario_color = self.color_palette[color_index % len(self.color_palette)]
+                color_index += 1
+
+                # Set xr.DataArray
+                da = self.data_info['da']
+
+                # Define season-to-month mapping and line styles for plotting
+                season_to_months = {
+                    'DJF': [12, 1, 2],
+                    'MAM': [3, 4, 5],
+                    'JJA': [6, 7, 8],
+                    'SON': [9, 10, 11]
+                }
+                season_to_line_dash = {
+                    'DJF': 'solid',
+                    'MAM': 'dotted',
+                    'JJA': 'dashdot',
+                    'SON': 'dotdash'
+                }
+
+                selected_seasons = self.season_months
+
+                for season in selected_seasons:
+                    
+                    months = season_to_months[season]
+                    line_dash = season_to_line_dash[season]
+
+                    # Group by year and selected months, and calculate mean OSISAF data 
+                    osisaf = self.constant_dataset.copy()
+                    osisaf.coords['year'] = osisaf.time.dt.year
+                    osisaf.coords['month'] = osisaf.time.dt.month
+                    osisaf_selected_months_mean = osisaf['sia'].sel(time=osisaf.time.dt.month.isin(months)).groupby('year').mean()
+
+                    # Group by year and selected months, and calculate mean MODEL data
+                    da.coords['year'] = da.time.dt.year
+                    da.coords['month'] = da.time.dt.month
+                    selected_months_mean = da.sel(time=da.time.dt.month.isin(months)).groupby('year').mean()
+
+                    # Prepare data for plotting
+                    osi_season_values = osisaf_selected_months_mean.values
+                    osi_season_years = osisaf_selected_months_mean.year.values
+                    osi_season_dates = [pd.Timestamp(year=int(year), month=months[0], day=1) for year in osi_season_years]
+                    osi_season_dates = pd.to_datetime(osi_season_dates, format='%Y-%m-%d')
+
+                    season_values = selected_months_mean.values
+                    season_years = selected_months_mean.year.values
+                    season_dates = [pd.Timestamp(year=int(year), month=months[0], day=1) for year in season_years]
+                    season_dates = pd.to_datetime(season_dates, format='%Y-%m-%d')
+
+
+                    # Ensure the data is 1D for each season
+                    if season_values.ndim > 1 and season_values.shape[1] > 1:
+                        season_values = season_values[:, 0]
+
+            
+                    # Create a ColumnDataSource for each line of Model data
+                    source = ColumnDataSource(data={
+                        'date': season_dates,
+                        'value': season_values
+                    })
+
+                    source_osi = ColumnDataSource(data={
+                        'date': osi_season_dates,
+                        'value': osi_season_values
+                    })
+
+                    # Define the hover tool with tooltips
+                    TOOLTIPS = '''
+                        <div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold">Date:</span>
+                                <span style="font-size: 12px;">@date{%F}</span>
+                            </div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold">Value:</span>
+                                <span style="font-size: 12px;">@value{0.000}</span>
+                                <span style="font-size: 12px;">mill. km<sup>2</sup></span>
+                            </div>
+                        </div>
+                    '''
+
+                    # Add HoverTool to the figure
+                    hover_tool = HoverTool(tooltips=TOOLTIPS, formatters={'@date': 'datetime'}, visible=False)
+                    self.figure.add_tools(hover_tool)
+
+                    # Plot the seasonal OSISAF data (only add legend once)
+                    if f'Seasonal OSISAF {season}' not in added_osisaf_legends:
+                        osi_point = self.figure.line('date','value', source=source_osi, legend_label=f'OSISAF {season}', line_width=3, color='black', line_dash=line_dash)
+                        #osi_point = self.figure.line(osi_season_dates, osi_season_values, legend_label=f'OSISAF {season}', line_width=3, color='black', line_dash=line_dash)
+                        legend_items.append(LegendItem(label=f'OSISAF {season}', renderers=[osi_point]))
+                        added_osisaf_legends.add(f'Seasonal OSISAF {season}')
+                    
+
+                    # Plot the seasonal MODEL data with the hover tool
+                    point = self.figure.line(
+                        'date', 'value', source=source,
+                        legend_label=f'{model} - {scenario} {season}',
+                        line_width=2, color=scenario_color, line_dash=line_dash
+                    )
+
+                    legend_items.append(LegendItem(label=f'{model} - {scenario} {season}', renderers=[point]))
+
+
+
+                    button = Button(label='Model Information something something', button_type='success')
+                    button.js_on_click(CustomJS(code="console.log('button: click!', this.toString())"))
+
+                    #show(button)
+
+                    ###### Statistics ######
+                    """
+                    # Calculating mean and std for models
+                    mean_values = selected_months_mean.mean(dim='year').values
+                    std_values = selected_months_mean.std(dim='year').values
+
+                    # Create bands for standard deviation
+                    band = Band(base='date', lower=mean_values - std_values, upper=mean_values + std_values,
+                                source=source, fill_alpha=0.3, fill_color='gray', line_color='black')
+                    self.figure.add_layout(band)
+                    """
+
 
         # Create a new legend with the updated items
         if self.figure.renderers:
             self.figure.legend.items = legend_items
             self.figure.legend.title = "Legend"
+            self.figure.legend.title_text_font_size = "20pt" 
             self.figure.legend.location = "bottom_left"
             self.figure.legend.click_policy = "hide"
-            self.figure.legend.label_text_font_size = "10pt"
+            self.figure.legend.label_text_font_size = "15pt"
             self.figure.legend.background_fill_alpha = 0
+
+            self.figure.yaxis.axis_label = f'{self.variable} [million km²]'
 
     
 
@@ -281,49 +317,56 @@ class SeaIceAnalysis(param.Parameterized):
         else:
             self.season_months_widget.visible = False
 
-
     
-
-    def view(self):
-        
-        # Use HTML pane to display information in a styled box
-        variable_info = pn.pane.HTML(
-            """
-            <div style="background-color: #969a97; opacity: 0.8; border: 1px solid #ccc; padding: 10px; border-radius: 5px;">
-                <strong>Variable Information:</strong><br>
-                - Sea Ice Area: Total area covered by sea ice.<br>
-                - Sea Ice Extent: Total area of any region with at least 15% areal fraction of sea ice.
-            </div>
-            """
-        )
-
-        model_info = pn.pane.HTML(
-            """
-            <div style="background-color: #06a77d; opacity: 0.8; border: 1px solid #ccc; padding: 10px; border-radius: 5px;">
-                <strong>Model Information:</strong><br>
+    def show_model_info(self, event):
+        model_info = """
+        <div style="background-color: #91a1a3; opacity: 0.8; border: 1px solid #ccc; padding: 20px; border-radius: 5px; width: 500px;">
+            <strong style="font-size: 24px;">Model Information:</strong><br>
+            <span style="font-size: 20px;">
                 - NorESM2-LM: Norwegian Earth System Model, focuses on climate interactions and ocean circulation.<br>
                 - MRI-ESM2-0: Meteorological Research Institute Earth System Model, emphasizes atmospheric processes and variability.<br>
                 - MIROC6: Model for Interdisciplinary Research on Climate, known for detailed atmospheric and oceanic simulations.<br>
                 - EC-Earth3-Veg: Integrates dynamic vegetation processes to study climate feedbacks.<br>
                 - CanESM5: Canadian Earth System Model, includes advanced carbon cycle and land surface interactions.<br>
-                - ACCESS-CM2: Australian Community Climate and Earth System Simulator, highlights regional climate dynamics and extremes.
-            </div>
-            """
-        )
+                - ACCESS-CM2: Australian Community Climate and Earth System Simulator, highlights regional climate dynamics and extremes.<br>
+                <br>
+                Source: <a href="https://esgf.llnl.gov/">ESGF Website</a>
+            </span>
+            
+        </div>
+        """
+        pn.panel(model_info).show()
 
-        scenario_info = pn.pane.HTML(
-            """
-            <div style="background-color: #1759d4; opacity: 0.8; border: 1px solid #ccc; padding: 10px; border-radius: 5px;">
-                <strong>Scenario Information:</strong><br>
-                - ssp126: Low emissions scenario, focusing on sustainability and reduced reliance on fossil fuels.<br>
-                - ssp245: Intermediate emissions scenario, balancing economic growth with moderate climate policies.<br>
-                - ssp370: High emissions scenario, characterized by regional rivalry and limited climate action.<br>
-                - ssp460: Intermediate emissions scenario with delayed, but eventual, emissions reductions.<br>
-                - ssp585: Very high emissions scenario, driven by fossil fuel development and minimal climate policies.
-            </div>
-            """
-        )
+    def show_scenario_info(self, event):
+        scenario_info = """
+        <div style="background-color: #91a1a3; opacity: 0.8; border: 1px solid #ccc; padding: 20px; border-radius: 5px; width: 500px;">
+            <strong style="font-size: 24px;">Scenario Information:</strong><br>
+            <span style="font-size: 20px;">
+            - ssp126: Low emissions scenario, focusing on sustainability and reduced reliance on fossil fuels.<br>
+            - ssp245: Intermediate emissions scenario, balancing economic growth with moderate climate policies.<br>
+            - ssp370: High emissions scenario, characterized by regional rivalry and limited climate action.<br>
+            - ssp460: Intermediate emissions scenario with delayed, but eventual, emissions reductions.<br>
+            - ssp585: Very high emissions scenario, driven by fossil fuel development and minimal climate policies.<br>
+            <br>
+            Source: <a href="https://esgf.llnl.gov/">ESGF Website</a>
+        </div>
+        """
+        pn.panel(scenario_info).show()
 
+    def show_variable_info(self, event):
+        variable_info = """
+        <div style="background-color: #91a1a3; opacity: 0.8; border: 1px solid #ccc; padding: 20px; border-radius: 5px; width: 500px;">
+            <strong style="font-size: 24px;">Variable Information:</strong><br>
+            <span style="font-size: 20px;">
+            - Sea Ice Area: Total area covered by sea ice.<br>
+            - Sea Ice Extent: Total area of any region with at least 15% areal fraction of sea ice.
+        </div>
+        """
+        pn.panel(variable_info).show()
+
+
+
+    def view(self):
         # Create the widgets
         widgets = {
             'color_scale_selector': pn.widgets.Select,
@@ -331,7 +374,7 @@ class SeaIceAnalysis(param.Parameterized):
             'temporal_resolution': pn.widgets.Select,
             'models': pn.widgets.CheckBoxGroup,
             'scenarios': pn.widgets.CheckBoxGroup,
-            'season_months': pn.widgets.CheckBoxGroup,
+            'season_months': pn.widgets.CheckBoxGroup
         }
         
                 
@@ -341,17 +384,23 @@ class SeaIceAnalysis(param.Parameterized):
             pn.Param(self.param.color_scale_selector, widgets={'color_scale_selector': pn.widgets.Select}),
             pn.pane.Markdown("### Variable"),
             pn.Param(self.param.variable, widgets={'variable': pn.widgets.Select}),
-            variable_info,
+            #variable_info,
             pn.pane.Markdown("### Temporal Resolution"),
             pn.Param(self.param.temporal_resolution, widgets={'temporal_resolution': pn.widgets.Select}),
             pn.pane.Markdown("### Models"),
             pn.Param(self.param.models, widgets={'models': pn.widgets.CheckBoxGroup}),
-            model_info,
+            #model_info,
             pn.pane.Markdown("### Scenarios"),
             pn.Param(self.param.scenarios, widgets={'scenarios': pn.widgets.CheckBoxGroup}),
-            scenario_info,
+            #scenario_info,
             pn.pane.Markdown("### Season Selector"),
-            pn.Param(self.param.season_months, widgets={'season_months': pn.widgets.CheckBoxGroup})
+            pn.Param(self.param.season_months, widgets={'season_months': pn.widgets.CheckBoxGroup}),
+            pn.pane.Markdown('### Information'),
+            #self.info_button,
+            self.model_info_button,
+            self.scenario_info_button,
+            self.variable_info_button
+            
         )
 
         return pn.Row(widget_layout, self.figure)
