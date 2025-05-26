@@ -81,7 +81,7 @@ class SeaIceAnalysis(param.Parameterized):
     season_months = param.ListSelector(objects=['DJF','MAM','JJA','SON'], default=['DJF'])
 
     # Adding statistics selector
-    #stats = param.ListSelector(objects=['Placeholder'], default=['Placeholder'])
+    #show_band = param.Boolean(default=False)
 
 
     def __init__(self, **params):
@@ -273,22 +273,33 @@ class SeaIceAnalysis(param.Parameterized):
 
 
 
-                    button = Button(label='Model Information something something', button_type='success')
-                    button.js_on_click(CustomJS(code="console.log('button: click!', this.toString())"))
-
-                    #show(button)
-
                     ###### Statistics ######
-                    """
-                    # Calculating mean and std for models
-                    mean_values = selected_months_mean.mean(dim='year').values
-                    std_values = selected_months_mean.std(dim='year').values
+                    # Convert season_values to a pandas Series
+                    season_values_series = pd.Series(season_values, index=season_dates)                 
+                    
+                    mean_season_values_series = season_values_series.mean()
+                    std_season_values_series = season_values_series.std()
+
+
+                    # Calculate lower and upper bounds for the band across all dates
+                    lower = [mean_season_values_series - std_season_values_series] * len(season_values_series)
+                    upper = [mean_season_values_series + std_season_values_series] * len(season_values_series)
+
+                    
+
+                    # Create a ColumnDataSource for the band
+                    std_source = ColumnDataSource(data={
+                        'date': season_values_series.index,
+                        'lower': lower,
+                        'upper': upper
+                    })
+
 
                     # Create bands for standard deviation
-                    band = Band(base='date', lower=mean_values - std_values, upper=mean_values + std_values,
-                                source=source, fill_alpha=0.3, fill_color='gray', line_color='black')
-                    self.figure.add_layout(band)
-                    """
+                    band = Band(base='date', lower='lower', upper='upper', source=std_source, level='underlay',
+                                fill_alpha=0.3, line_color='black')
+                    #self.figure.add_layout(band)
+
 
 
         # Create a new legend with the updated items
@@ -367,6 +378,46 @@ class SeaIceAnalysis(param.Parameterized):
 
 
     def view(self):
+        model_tooltips = {
+            'NorESM2-LM_sea_ice': "NorESM2-LM: Focuses on climate interactions and ocean circulation.",
+            'MRI-ESM2-0_sea_ice': "MRI-ESM2-0: Emphasizes atmospheric processes and variability.",
+            'MIROC6_sea_ice': "MIROC6: Detailed atmospheric and oceanic simulations.",
+            'EC-Earth3-Veg_sea_ice': "EC-Earth3-Veg: Integrates dynamic vegetation processes.",
+            'CanESM5_sea_ice': "CanESM5: Includes advanced carbon cycle interactions.",
+            'ACCESS-CM2_sea_ice': "ACCESS-CM2: Highlights regional climate dynamics."
+        }
+
+        scenario_tooltips = {
+            'ssp126': 'ssp126: Low emissions scenario, focusing on sustainability and reduced reliance on fossil fuels.',
+            'ssp245': 'ssp245: Intermediate emissions scenario, balancing economic growth with moderate climate policies.',
+            'ssp370': 'ssp370: High emissions scenario, characterized by regional rivalry and limited climate action.',
+            'ssp460': 'ssp460: Intermediate emissions scenario with delayed, but eventual, emissions reductions.',
+            'ssp585': 'ssp585: Very high emissions scenario, driven by fossil fuel development and minimal climate policies.'
+        }
+
+        season_tooltips = {
+            'DJF': 'DJF: December, January, February',
+            'MAM': 'MAM: March, April, May',
+            'JJA': 'JJA: June, July, August',
+            'SON': 'SON: September, October, November'
+        }
+
+        
+        # Wrap CheckBoxGroup in Tooltip
+        model_tooltip = pn.widgets.TooltipIcon(value="\n\n".join([f"{tooltip}" for model, tooltip in model_tooltips.items()])) 
+        scenario_tooltip = pn.widgets.TooltipIcon(value="\n\n".join([f"{tooltip}" for model, tooltip in scenario_tooltips.items()])) 
+        season_tooltip = pn.widgets.TooltipIcon(value="\n\n".join([f"{tooltip}" for model, tooltip in season_tooltips.items()])) 
+        
+
+        """
+        # Create a checkbox to toggle band visibility
+        band_toggle = pn.widgets.Checkbox(name='Show Standard Deviation Band', value=self.show_band)
+        
+        # Link the toggle to the parameter
+        pn.bind(self.update_plot, band_toggle)
+        """
+
+
         # Create the widgets
         widgets = {
             'color_scale_selector': pn.widgets.Select,
@@ -389,17 +440,21 @@ class SeaIceAnalysis(param.Parameterized):
             pn.Param(self.param.temporal_resolution, widgets={'temporal_resolution': pn.widgets.Select}),
             pn.pane.Markdown("### Models"),
             pn.Param(self.param.models, widgets={'models': pn.widgets.CheckBoxGroup}),
-            #model_info,
+            model_tooltip,
             pn.pane.Markdown("### Scenarios"),
             pn.Param(self.param.scenarios, widgets={'scenarios': pn.widgets.CheckBoxGroup}),
-            #scenario_info,
+            scenario_tooltip,
             pn.pane.Markdown("### Season Selector"),
             pn.Param(self.param.season_months, widgets={'season_months': pn.widgets.CheckBoxGroup}),
-            pn.pane.Markdown('### Information'),
+            season_tooltip
+            
+            #band_toggle
+            
+            #pn.pane.Markdown('### Information'),
             #self.info_button,
-            self.model_info_button,
-            self.scenario_info_button,
-            self.variable_info_button
+            #self.model_info_button,
+            #self.scenario_info_button,
+            #self.variable_info_button
             
         )
 
