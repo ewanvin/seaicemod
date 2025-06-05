@@ -12,7 +12,7 @@ from bokeh.io import show
 from bokeh.models import HoverTool, Paragraph, LegendItem, Legend, DatetimeAxis, CustomJSHover, CustomJS, ColumnDataSource, Band, Button
 import logging
 import param
-import toolkit as tk
+#import toolkit as tk
 from bokeh.palettes import viridis, cividis, plasma, Category10
 from bokeh.colors import RGB
 from bokeh.transform import linear_cmap
@@ -37,6 +37,25 @@ model_palette = Category10[10]
 ssp_scenarios = ['ssp126', 'ssp245', 'ssp370', 'ssp460', 'ssp585']
 number_of_colors = max(256, len(ssp_scenarios) * len(model_palette))
 scenario_palette = viridis(len(ssp_scenarios))
+
+def download_and_extract_data(var_type, model, temp_reso, scenario):
+    url_prefix = 'https://thredds.met.no/thredds/dodsC/metusers/steingod/deside/climmodseaice'
+    modified_model = model[:-8]
+
+    url = f'{url_prefix}/{var_type}/{model}/{temp_reso}/{scenario}/{var_type}_SImon_{modified_model}_{scenario}_r1i1p1f1_2015_2100.nc'
+    #download_and_extract_data('siarean', 'NorESM2-LM_sea_ice', 'Monthly', 'ssp126')
+    try:
+        ds = xr.open_dataset(url, cache=False)
+        da = ds[var_type]
+        title = ds.title
+        long_name = da.attrs['long_name']
+        units = da.attrs['units']
+        return {"da": da, "title": title, "long_name": long_name, "units": units}
+    except Exception as e:
+        print("An error occurred:", e)
+        return None
+
+
 
 # Generate color palettes with a specific number of colors
 def generate_palette(palette_func, num_colors):
@@ -139,6 +158,9 @@ class SeaIceAnalysis(param.Parameterized):
             self.color_palette = generate_palette(viridis, total_combinations)
     
 
+    
+
+
 
     @param.depends('variable', 'models', 'scenarios', 'color_scale_selector', 'season_months', watch=True)
     def update_plot(self):
@@ -163,7 +185,7 @@ class SeaIceAnalysis(param.Parameterized):
         for model_index, model in enumerate(self.models):
             for scenario_index, scenario in enumerate(self.scenarios):
                 # Use the actual variable name for data extraction
-                self.data_info = tk.download_and_extract_data(actual_variable, model, 'Monthly', scenario)  
+                self.data_info = download_and_extract_data(actual_variable, model, 'Monthly', scenario)  
                 
                 if self.data_info is None:
                     raise ValueError("Data could not be loaded.")
@@ -348,6 +370,7 @@ class SeaIceAnalysis(param.Parameterized):
         """
         pn.panel(model_info).show()
 
+
     def show_scenario_info(self, event):
         scenario_info = """
         <div style="background-color: #91a1a3; opacity: 0.8; border: 1px solid #ccc; padding: 20px; border-radius: 5px; width: 500px;">
@@ -464,4 +487,5 @@ class SeaIceAnalysis(param.Parameterized):
         
 
 sea_ice_analysis = SeaIceAnalysis()
-pn.serve(sea_ice_analysis.view, title='Sea Ice Analysis')
+#pn.serve(sea_ice_analysis.view, title='Sea Ice Analysis')
+sea_ice_analysis.view().servable(title='Sea Ice Analysis')
