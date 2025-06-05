@@ -11,5 +11,5 @@ Sea ice climate indicators visualization tool for time series based on climate i
 
 2. Run the application from `<current_working_dir>`, e.g.:
     ```sh
-    python bokeh-app/monthly/main.py
+    panel serve --show bokeh-app/monthly/main.py
     ```
