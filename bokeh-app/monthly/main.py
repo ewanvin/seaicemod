@@ -9,7 +9,7 @@ sys.path.append(os.path.join(app_root, 'bokeh-app'))
 import panel as pn
 from bokeh.plotting import figure
 from bokeh.io import show
-from bokeh.models import HoverTool, Paragraph, LegendItem, Legend, DatetimeAxis, CustomJSHover, CustomJS, ColumnDataSource, Band, Button
+from bokeh.models import HoverTool, Paragraph, LegendItem, Legend, DatetimeAxis, CustomJSHover, CustomJS, ColumnDataSource, Band, Button, VArea
 import logging
 import param
 #import toolkit as tk
@@ -100,7 +100,10 @@ class SeaIceAnalysis(param.Parameterized):
     season_months = param.ListSelector(objects=['DJF','MAM','JJA','SON'], default=['DJF'])
 
     # Adding statistics selector
-    #show_band = param.Boolean(default=False)
+    show_band = param.Boolean(default=False)  # Parameter to toggle the band visibility
+    _band_renderers = [] # Track band renderes added to the figure
+    _band = None
+
 
 
     def __init__(self, **params):
@@ -114,34 +117,35 @@ class SeaIceAnalysis(param.Parameterized):
         self.figure.yaxis.axis_label_text_font_size = "20pt"
         self.figure.ygrid.grid_line_alpha = 0.2
         self.figure.xgrid.grid_line_alpha = 0.2
-        self.figure.sizing_mode = 'stretch_both'
-
-        # Set the background color of the figure
-        #self.figure.background_fill_color = '#e5ece9'
-
+        self.figure.sizing_mode = 'stretch_both' 
 
         # Create buttons
         self.model_info_button = pn.widgets.Button(name='Model Information', button_type='success')
         self.scenario_info_button = pn.widgets.Button(name='Scenario Information', button_type='success')
         self.variable_info_button = pn.widgets.Button(name='Variable Information', button_type='success')
 
-        self.model_info_button.on_click(self.show_model_info)
-        self.scenario_info_button.on_click(self.show_scenario_info)
-        self.variable_info_button.on_click(self.show_variable_info)
-
-
+        # Add a toggle button for showing/hiding the band
+        self.band_toggle_button = pn.widgets.Toggle(name='Show Standard Deviation Band', button_type="primary", value=self.show_band)
+        self.band_toggle_button.param.watch(self.toggle_band_visibility, 'value')
         
-
         # Adding osisaf data
         self.constant_dataset = xr.open_dataset('https://thredds.met.no/thredds/dodsC/osisaf/met.no/ice/index/v2p2/nh/osisaf_nh_sia_monthly.nc')
         self.constant_time = self.constant_dataset.time.values 
         self.constant_values = self.constant_dataset['sia'].values
 
-
         self.season_months_widget = pn.Param(self.param.season_months, widgets={'season_months': pn.widgets.CheckBoxGroup})
+
         self.update_season_selector_visibility()
         self.update_plot() # Initialize the plot with default parameters
 
+
+    def toggle_band_visibility(self, event):
+        """
+        Updates the 'show_band' parameter and triggers a re-render of the plot
+        when the toggle button is clicked.
+        """
+        self.show_band = event.new  # Update the show_band parameter
+        self.update_plot()  # Re-render the plot 
 
 
     @param.depends('color_scale_selector', watch=True)
@@ -162,7 +166,7 @@ class SeaIceAnalysis(param.Parameterized):
 
 
 
-    @param.depends('variable', 'models', 'scenarios', 'color_scale_selector', 'season_months', watch=True)
+    @param.depends('variable', 'models', 'scenarios', 'color_scale_selector', 'season_months', 'show_band', watch=True)
     def update_plot(self):
         # Update the color palette based on the selected color scale
         self.update_color_palette()
@@ -170,7 +174,7 @@ class SeaIceAnalysis(param.Parameterized):
         # Clear the figure and legend items
         self.figure.renderers = []
         self.figure.legend.items = []
-
+        
         legend_items = []
         added_osisaf_legends = set()
 
@@ -180,6 +184,7 @@ class SeaIceAnalysis(param.Parameterized):
         # Remove OSISAF data from the original line plot
         line = self.figure.line(self.constant_time, self.constant_values, legend_label="Osisaf", line_width=2, color="black")
         line.visible = False
+        
 
         color_index = 0
         for model_index, model in enumerate(self.models):
@@ -307,22 +312,37 @@ class SeaIceAnalysis(param.Parameterized):
                     lower = [mean_season_values_series - std_season_values_series] * len(season_values_series)
                     upper = [mean_season_values_series + std_season_values_series] * len(season_values_series)
 
-                    
-
                     # Create a ColumnDataSource for the band
                     std_source = ColumnDataSource(data={
                         'date': season_values_series.index,
                         'lower': lower,
                         'upper': upper
                     })
+    
 
+                    # Add the band if show_band is True
+                    if self.show_band:
+                        print('Adding Band...')
+                        band = Band(
+                            base='date', lower='lower', upper='upper', source=std_source,
+                            fill_alpha=0.1, fill_color=scenario_color, line_color='black'
+                        )
+                        self.figure.add_layout(band)  
+                        self._band_renderers.append(band)
+                        print('Tracked Bands:', self._band_renderers)
 
-                    # Create bands for standard deviation
-                    band = Band(base='date', lower='lower', upper='upper', source=std_source, level='underlay',
-                                fill_alpha=0.3, line_color='black')
-                    #self.figure.add_layout(band)
+                    elif self._band_renderers:
+                        print('Removing Bands...')
+                        for band in self._band_renderers:
+                            try:
+                                self.figure.center.remove(band)
+                            except (AttributeError, ValueError):
+                                pass
 
+                        self._band_renderers = []
+                        print('Tracked Bands After Removal:', self._band_renderers)
 
+                        
 
         # Create a new legend with the updated items
         if self.figure.renderers:
@@ -350,64 +370,15 @@ class SeaIceAnalysis(param.Parameterized):
         else:
             self.season_months_widget.visible = False
 
-    
-    def show_model_info(self, event):
-        model_info = """
-        <div style="background-color: #91a1a3; opacity: 0.8; border: 1px solid #ccc; padding: 20px; border-radius: 5px; width: 500px;">
-            <strong style="font-size: 24px;">Model Information:</strong><br>
-            <span style="font-size: 20px;">
-                - NorESM2-LM: Norwegian Earth System Model, focuses on climate interactions and ocean circulation.<br>
-                - MRI-ESM2-0: Meteorological Research Institute Earth System Model, emphasizes atmospheric processes and variability.<br>
-                - MIROC6: Model for Interdisciplinary Research on Climate, known for detailed atmospheric and oceanic simulations.<br>
-                - EC-Earth3-Veg: Integrates dynamic vegetation processes to study climate feedbacks.<br>
-                - CanESM5: Canadian Earth System Model, includes advanced carbon cycle and land surface interactions.<br>
-                - ACCESS-CM2: Australian Community Climate and Earth System Simulator, highlights regional climate dynamics and extremes.<br>
-                <br>
-                Source: <a href="https://esgf.llnl.gov/">ESGF Website</a>
-            </span>
-            
-        </div>
-        """
-        pn.panel(model_info).show()
-
-
-    def show_scenario_info(self, event):
-        scenario_info = """
-        <div style="background-color: #91a1a3; opacity: 0.8; border: 1px solid #ccc; padding: 20px; border-radius: 5px; width: 500px;">
-            <strong style="font-size: 24px;">Scenario Information:</strong><br>
-            <span style="font-size: 20px;">
-            - ssp126: Low emissions scenario, focusing on sustainability and reduced reliance on fossil fuels.<br>
-            - ssp245: Intermediate emissions scenario, balancing economic growth with moderate climate policies.<br>
-            - ssp370: High emissions scenario, characterized by regional rivalry and limited climate action.<br>
-            - ssp460: Intermediate emissions scenario with delayed, but eventual, emissions reductions.<br>
-            - ssp585: Very high emissions scenario, driven by fossil fuel development and minimal climate policies.<br>
-            <br>
-            Source: <a href="https://esgf.llnl.gov/">ESGF Website</a>
-        </div>
-        """
-        pn.panel(scenario_info).show()
-
-    def show_variable_info(self, event):
-        variable_info = """
-        <div style="background-color: #91a1a3; opacity: 0.8; border: 1px solid #ccc; padding: 20px; border-radius: 5px; width: 500px;">
-            <strong style="font-size: 24px;">Variable Information:</strong><br>
-            <span style="font-size: 20px;">
-            - Sea Ice Area: Total area covered by sea ice.<br>
-            - Sea Ice Extent: Total area of any region with at least 15% areal fraction of sea ice.
-        </div>
-        """
-        pn.panel(variable_info).show()
-
-
 
     def view(self):
         model_tooltips = {
-            'NorESM2-LM_sea_ice': "NorESM2-LM: Focuses on climate interactions and ocean circulation.",
-            'MRI-ESM2-0_sea_ice': "MRI-ESM2-0: Emphasizes atmospheric processes and variability.",
-            'MIROC6_sea_ice': "MIROC6: Detailed atmospheric and oceanic simulations.",
-            'EC-Earth3-Veg_sea_ice': "EC-Earth3-Veg: Integrates dynamic vegetation processes.",
-            'CanESM5_sea_ice': "CanESM5: Includes advanced carbon cycle interactions.",
-            'ACCESS-CM2_sea_ice': "ACCESS-CM2: Highlights regional climate dynamics."
+            'NorESM2-LM_sea_ice': "NorESM2-LM: Focuses on climate interactions and ocean circulation. See: https://gmd.copernicus.org/articles/13/6165/2020/",
+            'MRI-ESM2-0_sea_ice': "MRI-ESM2-0: Emphasizes atmospheric processes and variability. See: https://www.wdc-climate.de/ui/cmip6?input=CMIP6.CMIP.MRI.MRI-ESM2-0",
+            'MIROC6_sea_ice': "MIROC6: Detailed atmospheric and oceanic simulations. See: https://gmd.copernicus.org/articles/12/2727/2019/",
+            'EC-Earth3-Veg_sea_ice': "EC-Earth3-Veg: Integrates dynamic vegetation processes. See: https://gmd.copernicus.org/articles/15/2973/2022/",
+            'CanESM5_sea_ice': "CanESM5: Includes advanced carbon cycle interactions. See: https://gmd.copernicus.org/articles/12/4823/2019/",
+            'ACCESS-CM2_sea_ice': "ACCESS-CM2: Highlights regional climate dynamics. See: https://www.access-nri.org.au/models/earth-system-models/coupled-model-cm/"
         }
 
         scenario_tooltips = {
@@ -415,7 +386,8 @@ class SeaIceAnalysis(param.Parameterized):
             'ssp245': 'ssp245: Intermediate emissions scenario, balancing economic growth with moderate climate policies.',
             'ssp370': 'ssp370: High emissions scenario, characterized by regional rivalry and limited climate action.',
             'ssp460': 'ssp460: Intermediate emissions scenario with delayed, but eventual, emissions reductions.',
-            'ssp585': 'ssp585: Very high emissions scenario, driven by fossil fuel development and minimal climate policies.'
+            'ssp585': 'ssp585: Very high emissions scenario, driven by fossil fuel development and minimal climate policies.',
+            'See:': 'See: https://www.anthesisgroup.com/insights/five-future-scenarios-ar6-ipcc/' 
         }
 
         season_tooltips = {
@@ -431,15 +403,6 @@ class SeaIceAnalysis(param.Parameterized):
         scenario_tooltip = pn.widgets.TooltipIcon(value="\n\n".join([f"{tooltip}" for model, tooltip in scenario_tooltips.items()])) 
         season_tooltip = pn.widgets.TooltipIcon(value="\n\n".join([f"{tooltip}" for model, tooltip in season_tooltips.items()])) 
         
-
-        """
-        # Create a checkbox to toggle band visibility
-        band_toggle = pn.widgets.Checkbox(name='Show Standard Deviation Band', value=self.show_band)
-        
-        # Link the toggle to the parameter
-        pn.bind(self.update_plot, band_toggle)
-        """
-
 
         # Create the widgets
         widgets = {
@@ -469,21 +432,12 @@ class SeaIceAnalysis(param.Parameterized):
             scenario_tooltip,
             pn.pane.Markdown("### Season Selector"),
             pn.Param(self.param.season_months, widgets={'season_months': pn.widgets.CheckBoxGroup}),
-            season_tooltip
-            
-            #band_toggle
-            
-            #pn.pane.Markdown('### Information'),
-            #self.info_button,
-            #self.model_info_button,
-            #self.scenario_info_button,
-            #self.variable_info_button
-            
+            season_tooltip,
+            self.band_toggle_button  # Add the toggle button to the widget layout      
         )
 
-        return pn.Row(widget_layout, self.figure)
-        
 
+        return pn.Row(widget_layout, self.figure)
         
 
 sea_ice_analysis = SeaIceAnalysis()
