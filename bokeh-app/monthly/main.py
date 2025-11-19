@@ -129,7 +129,7 @@ class SeaIceAnalysis(param.Parameterized):
         self.band_toggle_button.param.watch(self.toggle_band_visibility, 'value')
         
         # Adding osisaf data
-        self.constant_dataset = xr.open_dataset('https://thredds.met.no/thredds/dodsC/osisaf/met.no/ice/index/v2p2/nh/osisaf_nh_sia_monthly.nc')
+        self.constant_dataset = xr.open_dataset('https://thredds.met.no/thredds/dodsC/osisaf/met.no/ice/index/v2p3/nh/osisaf_nh_sia_monthly.nc')
         self.constant_time = self.constant_dataset.time.values 
         self.constant_values = self.constant_dataset['sia'].values
 
