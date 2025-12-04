@@ -38,11 +38,12 @@ ssp_scenarios = ['ssp126', 'ssp245', 'ssp370', 'ssp460', 'ssp585']
 number_of_colors = max(256, len(ssp_scenarios) * len(model_palette))
 scenario_palette = viridis(len(ssp_scenarios))
 
-def download_and_extract_data(var_type, model, temp_reso, scenario):
+def download_and_extract_data(var_type, model, temp_reso, scenario, ensemble_member='r1i1p1f1'):
     url_prefix = 'https://thredds.met.no/thredds/dodsC/metusers/steingod/deside/climmodseaice'
     modified_model = model[:-8]
 
-    url = f'{url_prefix}/{var_type}/{model}/{temp_reso}/{scenario}/{var_type}_SImon_{modified_model}_{scenario}_r1i1p1f1_2015_2100.nc'
+    #url = f'{url_prefix}/{var_type}/{model}/{temp_reso}/{scenario}/{var_type}_SImon_{modified_model}_{scenario}_r1i1p1f1_2015_2100.nc'
+    url = f'{url_prefix}/{var_type}/{model}/{temp_reso}/{scenario}/{ensemble_member}/{var_type}_SImon_{modified_model}_{scenario}_{ensemble_member}_2015_2100.nc'
     #download_and_extract_data('siarean', 'NorESM2-LM_sea_ice', 'Monthly', 'ssp126')
     try:
         ds = xr.open_dataset(url, cache=False)
@@ -95,6 +96,13 @@ class SeaIceAnalysis(param.Parameterized):
         'ACCESS-CM2_sea_ice'], 
         default=['NorESM2-LM_sea_ice'])
     scenarios = param.ListSelector(objects=ssp_scenarios, default=['ssp126'])
+
+    # Adding ensemble members
+    ensemble_members = param.ListSelector(
+        objects=['r1i1p1f1', 'r2i1p1f1', 'r3i1p1f1', 'r4i1p1f1', 'r5i1p1f1', 'r6i1p1f1', 'r7i1p1f1', 'r8i1p1f1', 'r9i1p1f1', 'r10i1p1f1'], 
+        default=['r1i1p1f1']
+    )
+    
     
     # Add selection of months when selecting Seasonal reso
     season_months = param.ListSelector(objects=['DJF','MAM','JJA','SON'], default=['DJF'])
@@ -125,7 +133,7 @@ class SeaIceAnalysis(param.Parameterized):
         self.variable_info_button = pn.widgets.Button(name='Variable Information', button_type='success')
 
         # Add a toggle button for showing/hiding the band
-        self.band_toggle_button = pn.widgets.Toggle(name='Show Standard Deviation Band', button_type="primary", value=self.show_band)
+        self.band_toggle_button = pn.widgets.Toggle(name='Show Spread Band', button_type="primary", value=self.show_band)
         self.band_toggle_button.param.watch(self.toggle_band_visibility, 'value')
         
         # Adding osisaf data
@@ -141,9 +149,9 @@ class SeaIceAnalysis(param.Parameterized):
 
     def toggle_band_visibility(self, event):
         """
-        Updates the 'show_band' parameter and triggers a re-render of the plot
-        when the toggle button is clicked.
-        """
+        #Updates the 'show_band' parameter and triggers a re-render of the plot
+        #when the toggle button is clicked.
+"""
         self.show_band = event.new  # Update the show_band parameter
         self.update_plot()  # Re-render the plot 
 
@@ -166,7 +174,7 @@ class SeaIceAnalysis(param.Parameterized):
 
 
 
-    @param.depends('variable', 'models', 'scenarios', 'color_scale_selector', 'season_months', 'show_band', watch=True)
+    @param.depends('variable', 'models', 'scenarios', 'ensemble_members', 'color_scale_selector', 'season_months', 'show_band', watch=True)
     def update_plot(self):
         # Update the color palette based on the selected color scale
         self.update_color_palette()
@@ -189,159 +197,204 @@ class SeaIceAnalysis(param.Parameterized):
         color_index = 0
         for model_index, model in enumerate(self.models):
             for scenario_index, scenario in enumerate(self.scenarios):
-                # Use the actual variable name for data extraction
-                self.data_info = download_and_extract_data(actual_variable, model, 'Monthly', scenario)  
+                for ensemble_member in self.ensemble_members: 
+                    # Use the actual variable name for data extraction
+                    self.data_info = download_and_extract_data(actual_variable, model, 'Monthly', scenario, ensemble_member)  
+                    
+                    if self.data_info is None:
+                        raise ValueError(f"Data could not be loaded ({model[0:10]} {scenario} {ensemble_member}).")
+
+                    # Get color for the model and scenario
+                    scenario_color = self.color_palette[color_index % len(self.color_palette)]
+                    color_index += 1
+
+                    # Set xr.DataArray
+                    da = self.data_info['da']
+
+                    # Define season-to-month mapping and line styles for plotting
+                    season_to_months = {
+                        'DJF': [12, 1, 2],
+                        'MAM': [3, 4, 5],
+                        'JJA': [6, 7, 8],
+                        'SON': [9, 10, 11]
+                    }
+                    season_to_line_dash = {
+                        'DJF': 'solid',
+                        'MAM': 'dotted',
+                        'JJA': 'dashdot',
+                        'SON': 'dotdash'
+                    }
+
+                    selected_seasons = self.season_months
+
+                    for season in selected_seasons:
+                        
+                        months = season_to_months[season]
+                        line_dash = season_to_line_dash[season]
+
+                        # Group by year and selected months, and calculate mean OSISAF data 
+                        osisaf = self.constant_dataset.copy()
+                        osisaf.coords['year'] = osisaf.time.dt.year
+                        osisaf.coords['month'] = osisaf.time.dt.month
+                        osisaf_selected_months_mean = osisaf['sia'].sel(time=osisaf.time.dt.month.isin(months)).groupby('year').mean()
+
+                        # Group by year and selected months, and calculate mean MODEL data
+                        da.coords['year'] = da.time.dt.year
+                        da.coords['month'] = da.time.dt.month
+                        selected_months_mean = da.sel(time=da.time.dt.month.isin(months)).groupby('year').mean()
+
+                        # Prepare data for plotting
+                        osi_season_values = osisaf_selected_months_mean.values
+                        osi_season_years = osisaf_selected_months_mean.year.values
+                        osi_season_dates = [pd.Timestamp(year=int(year), month=months[0], day=1) for year in osi_season_years]
+                        osi_season_dates = pd.to_datetime(osi_season_dates, format='%Y-%m-%d')
+
+                        season_values = selected_months_mean.values
+                        season_years = selected_months_mean.year.values
+                        season_dates = [pd.Timestamp(year=int(year), month=months[0], day=1) for year in season_years]
+                        season_dates = pd.to_datetime(season_dates, format='%Y-%m-%d')
+
+
+                        # Ensure the data is 1D for each season
+                        if season_values.ndim > 1 and season_values.shape[1] > 1:
+                            season_values = season_values[:, 0]
+
                 
-                if self.data_info is None:
-                    raise ValueError("Data could not be loaded.")
+                        # Create a ColumnDataSource for each line of Model data
+                        source = ColumnDataSource(data={
+                            'date': season_dates,
+                            'value': season_values,
+                            'model': [model] * len(season_dates)  # Model name repeated for each date
+                        })
 
-                # Get color for the model and scenario
-                scenario_color = self.color_palette[color_index % len(self.color_palette)]
-                color_index += 1
+                        osi_name = 'OSISAF'
+                        source_osi = ColumnDataSource(data={
+                            'date': osi_season_dates,
+                            'value': osi_season_values,
+                            'model': [osi_name] * len(osi_season_dates)  # Repeat 'OSISAF' for each date
+                        })
 
-                # Set xr.DataArray
-                da = self.data_info['da']
-
-                # Define season-to-month mapping and line styles for plotting
-                season_to_months = {
-                    'DJF': [12, 1, 2],
-                    'MAM': [3, 4, 5],
-                    'JJA': [6, 7, 8],
-                    'SON': [9, 10, 11]
-                }
-                season_to_line_dash = {
-                    'DJF': 'solid',
-                    'MAM': 'dotted',
-                    'JJA': 'dashdot',
-                    'SON': 'dotdash'
-                }
-
-                selected_seasons = self.season_months
-
-                for season in selected_seasons:
-                    
-                    months = season_to_months[season]
-                    line_dash = season_to_line_dash[season]
-
-                    # Group by year and selected months, and calculate mean OSISAF data 
-                    osisaf = self.constant_dataset.copy()
-                    osisaf.coords['year'] = osisaf.time.dt.year
-                    osisaf.coords['month'] = osisaf.time.dt.month
-                    osisaf_selected_months_mean = osisaf['sia'].sel(time=osisaf.time.dt.month.isin(months)).groupby('year').mean()
-
-                    # Group by year and selected months, and calculate mean MODEL data
-                    da.coords['year'] = da.time.dt.year
-                    da.coords['month'] = da.time.dt.month
-                    selected_months_mean = da.sel(time=da.time.dt.month.isin(months)).groupby('year').mean()
-
-                    # Prepare data for plotting
-                    osi_season_values = osisaf_selected_months_mean.values
-                    osi_season_years = osisaf_selected_months_mean.year.values
-                    osi_season_dates = [pd.Timestamp(year=int(year), month=months[0], day=1) for year in osi_season_years]
-                    osi_season_dates = pd.to_datetime(osi_season_dates, format='%Y-%m-%d')
-
-                    season_values = selected_months_mean.values
-                    season_years = selected_months_mean.year.values
-                    season_dates = [pd.Timestamp(year=int(year), month=months[0], day=1) for year in season_years]
-                    season_dates = pd.to_datetime(season_dates, format='%Y-%m-%d')
-
-
-                    # Ensure the data is 1D for each season
-                    if season_values.ndim > 1 and season_values.shape[1] > 1:
-                        season_values = season_values[:, 0]
-
-            
-                    # Create a ColumnDataSource for each line of Model data
-                    source = ColumnDataSource(data={
-                        'date': season_dates,
-                        'value': season_values
-                    })
-
-                    source_osi = ColumnDataSource(data={
-                        'date': osi_season_dates,
-                        'value': osi_season_values
-                    })
-
-                    # Define the hover tool with tooltips
-                    TOOLTIPS = '''
-                        <div>
+                        # Define the hover tool with tooltips
+                        TOOLTIPS = '''
                             <div>
-                                <span style="font-size: 12px; font-weight: bold">Date:</span>
-                                <span style="font-size: 12px;">@date{%F}</span>
+                                <div>
+                                    <span style="font-size: 12px; font-weight: bold">Model:</span>
+                                    <span style="font-size: 12px;">@model</span>
+                                </div>
+                                <div>
+                                    <span style="font-size: 12px; font-weight: bold">Date:</span>
+                                    <span style="font-size: 12px;">@date{%F}</span>
+                                </div>
+                                <div>
+                                    <span style="font-size: 12px; font-weight: bold">Value:</span>
+                                    <span style="font-size: 12px;">@value{0.000}</span>
+                                    <span style="font-size: 12px;">mill. km<sup>2</sup></span>
+                                </div>
                             </div>
-                            <div>
-                                <span style="font-size: 12px; font-weight: bold">Value:</span>
-                                <span style="font-size: 12px;">@value{0.000}</span>
-                                <span style="font-size: 12px;">mill. km<sup>2</sup></span>
-                            </div>
-                        </div>
-                    '''
+                        '''
 
-                    # Add HoverTool to the figure
-                    hover_tool = HoverTool(tooltips=TOOLTIPS, formatters={'@date': 'datetime'}, visible=False)
-                    self.figure.add_tools(hover_tool)
+                        # Add HoverTool to the figure
+                        hover_tool = HoverTool(tooltips=TOOLTIPS, formatters={'@date': 'datetime'}, visible=False)
+                        self.figure.add_tools(hover_tool)
 
-                    # Plot the seasonal OSISAF data (only add legend once)
-                    if f'Seasonal OSISAF {season}' not in added_osisaf_legends:
-                        osi_point = self.figure.line('date','value', source=source_osi, legend_label=f'OSISAF {season}', line_width=3, color='black', line_dash=line_dash)
-                        #osi_point = self.figure.line(osi_season_dates, osi_season_values, legend_label=f'OSISAF {season}', line_width=3, color='black', line_dash=line_dash)
-                        legend_items.append(LegendItem(label=f'OSISAF {season}', renderers=[osi_point]))
-                        added_osisaf_legends.add(f'Seasonal OSISAF {season}')
-                    
+                        # Plot the seasonal OSISAF data (only add legend once)
+                        if f'Seasonal OSISAF {season}' not in added_osisaf_legends:
+                            osi_point = self.figure.line('date','value', source=source_osi, legend_label=f'OSISAF {season}', line_width=3, color='black', line_dash=line_dash)
+                            #osi_point = self.figure.line(osi_season_dates, osi_season_values, legend_label=f'OSISAF {season}', line_width=3, color='black', line_dash=line_dash)
+                            legend_items.append(LegendItem(label=f'OSISAF {season}', renderers=[osi_point]))
+                            added_osisaf_legends.add(f'Seasonal OSISAF {season}')
+                        
 
-                    # Plot the seasonal MODEL data with the hover tool
-                    point = self.figure.line(
-                        'date', 'value', source=source,
-                        legend_label=f'{model} - {scenario} {season}',
-                        line_width=2, color=scenario_color, line_dash=line_dash
-                    )
-
-                    legend_items.append(LegendItem(label=f'{model} - {scenario} {season}', renderers=[point]))
-
-
-
-                    ###### Statistics ######
-                    # Convert season_values to a pandas Series
-                    season_values_series = pd.Series(season_values, index=season_dates)                 
-                    
-                    mean_season_values_series = season_values_series.mean()
-                    std_season_values_series = season_values_series.std()
-
-
-                    # Calculate lower and upper bounds for the band across all dates
-                    lower = [mean_season_values_series - std_season_values_series] * len(season_values_series)
-                    upper = [mean_season_values_series + std_season_values_series] * len(season_values_series)
-
-                    # Create a ColumnDataSource for the band
-                    std_source = ColumnDataSource(data={
-                        'date': season_values_series.index,
-                        'lower': lower,
-                        'upper': upper
-                    })
-    
-
-                    # Add the band if show_band is True
-                    if self.show_band:
-                        print('Adding Band...')
-                        band = Band(
-                            base='date', lower='lower', upper='upper', source=std_source,
-                            fill_alpha=0.1, fill_color=scenario_color, line_color='black'
+                        # Plot the seasonal MODEL data with the hover tool
+                        point = self.figure.line(
+                            'date', 'value', source=source,
+                            legend_label=f'{model} - {scenario} ({ensemble_member}) {season}',
+                            line_width=2, color=scenario_color, line_dash=line_dash
                         )
-                        self.figure.add_layout(band)  
-                        self._band_renderers.append(band)
-                        print('Tracked Bands:', self._band_renderers)
 
-                    elif self._band_renderers:
-                        print('Removing Bands...')
-                        for band in self._band_renderers:
-                            try:
-                                self.figure.center.remove(band)
-                            except (AttributeError, ValueError):
-                                pass
+                        legend_items.append(LegendItem(label=f'{model} - {scenario} ({ensemble_member}) {season}', renderers=[point]))
 
-                        self._band_renderers = []
-                        print('Tracked Bands After Removal:', self._band_renderers)
 
+                        
+                        ###### Statistics ######
+                        # Collect data across all ensemble members for this model-scenario combination
+                        ensemble_data = []
+                        
+                        for ensemble_member in self.ensemble_members:
+                            # Extract data for the current ensemble member
+                            self.data_info = download_and_extract_data(actual_variable, model, 'Monthly', scenario, ensemble_member)
+                            if self.data_info is None:
+                                print(f"Data could not be loaded for {model}, {scenario}, {ensemble_member}.")
+                                continue
+
+                            da = self.data_info['da']
+
+                            # Group by year and selected months, and calculate mean for the current ensemble member
+                            da.coords['year'] = da.time.dt.year
+                            da.coords['month'] = da.time.dt.month
+                            selected_months_mean = da.sel(time=da.time.dt.month.isin(months)).groupby('year').mean()
+                        
+                            # Add the ensemble member's mean data to the list
+                            ensemble_data.append(selected_months_mean.values)
+
+                        # Ensure there is data to process
+                        if len(ensemble_data) > 0:
+                            # Combine all ensemble member data into a single NumPy array
+                            # Shape: (number_of_ensemble_members, number_of_dates)
+                            ensemble_array = np.array(ensemble_data)
+
+                            # Calculate the min and max across all ensemble members for each date
+                            min_values = np.min(ensemble_array, axis=0)
+                            max_values = np.max(ensemble_array, axis=0)
+
+                            # Prepare the dates (x-axis) for the band
+                            season_years = selected_months_mean.year.values
+                            season_dates = [pd.Timestamp(year=int(year), month=months[0], day=1) for year in season_years]
+                            season_dates = pd.to_datetime(season_dates, format='%Y-%m-%d')
+
+                            # Create a ColumnDataSource for the band
+                            spread_source = ColumnDataSource(data={
+                                'date': season_dates,  # Dates (x-axis)
+                                'lower': min_values,   # Minimum values (lower bound of the band)
+                                'upper': max_values    # Maximum values (upper bound of the band)
+                            })
+
+                            # Add the band to the figure if `show_band` is True
+                            if self.show_band:
+                                print('Adding Spread Band...')
+                                
+                                # Create the band for the spread
+                                spread_band = Band(
+                                    base='date', lower='lower', upper='upper', source=spread_source,
+                                    fill_alpha=0.05, fill_color=scenario_color, line_color='black'
+                                )
+                                
+                                # Add the band to the figure
+                                self.figure.add_layout(spread_band)
+                                
+                                # Track the band renderers so we can remove them later
+                                self._band_renderers.append(spread_band)
+                                print('Tracked Bands:', self._band_renderers)
+
+                            # Remove the band if `show_band` is False
+                            else:
+                                print('Removing Bands...')
+                                
+                                # Iterate over the tracked bands and remove them from the figure
+                                for band in self._band_renderers:
+                                    try:
+                                        self.figure.center.remove(band)
+                                        
+                                    except (AttributeError, ValueError) as e:
+                                        print(f"Error removing band: {e}")
+                                
+                                # Clear the list of tracked bands
+                                self._band_renderers = []
+                                print('Tracked Bands After Removal:', self._band_renderers)
+                        else:
+                            print(f"No ensemble data available for {model}-{scenario}.")
+                                                    
+                        
                         
 
         # Create a new legend with the updated items
@@ -430,6 +483,8 @@ class SeaIceAnalysis(param.Parameterized):
             pn.pane.Markdown("### Scenarios"),
             pn.Param(self.param.scenarios, widgets={'scenarios': pn.widgets.CheckBoxGroup}),
             scenario_tooltip,
+            pn.pane.Markdown("### Ensemble Members"),
+            pn.Param(self.param.ensemble_members, widgets={'ensemble_members': pn.widgets.CheckBoxGroup}),  # Add ensemble members widget
             pn.pane.Markdown("### Season Selector"),
             pn.Param(self.param.season_months, widgets={'season_months': pn.widgets.CheckBoxGroup}),
             season_tooltip,
