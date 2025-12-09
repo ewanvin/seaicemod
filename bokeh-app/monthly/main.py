@@ -19,6 +19,7 @@ from bokeh.transform import linear_cmap
 import xarray as xr
 import numpy as np 
 import pandas as pd
+from functools import lru_cache
 
 # Specify a loading spinner wheel to display when data is being loaded
 pn.extension(loading_spinner='dots', loading_color='#696969')
@@ -38,6 +39,7 @@ ssp_scenarios = ['ssp126', 'ssp245', 'ssp370', 'ssp460', 'ssp585']
 number_of_colors = max(256, len(ssp_scenarios) * len(model_palette))
 scenario_palette = viridis(len(ssp_scenarios))
 
+@lru_cache(maxsize=128)  # Cache up to 128 unique datasets
 def download_and_extract_data(var_type, model, temp_reso, scenario, ensemble_member='r1i1p1f1'):
     url_prefix = 'https://thredds.met.no/thredds/dodsC/metusers/steingod/deside/climmodseaice'
     modified_model = model[:-8]
@@ -116,6 +118,12 @@ class SeaIceAnalysis(param.Parameterized):
 
     def __init__(self, **params):
         super().__init__(**params)
+
+        # Load OSISAF data once during initialization
+        self.constant_dataset = xr.open_dataset('https://thredds.met.no/thredds/dodsC/osisaf/met.no/ice/index/v2p3/nh/osisaf_nh_sia_monthly.nc')
+        self.constant_time = pd.to_datetime(self.constant_dataset.time.values)
+        self.constant_values = self.constant_dataset['sia'].values
+
         self.data_info = None
         self.figure = figure(title="Sea Ice Visualization", x_axis_label='Year', y_axis_label='1e6 km2', x_axis_type='datetime')#, width=1500, height=800)
         self.figure.title.text_font_size = "20pt"
@@ -137,9 +145,9 @@ class SeaIceAnalysis(param.Parameterized):
         self.band_toggle_button.param.watch(self.toggle_band_visibility, 'value')
         
         # Adding osisaf data
-        self.constant_dataset = xr.open_dataset('https://thredds.met.no/thredds/dodsC/osisaf/met.no/ice/index/v2p3/nh/osisaf_nh_sia_monthly.nc')
-        self.constant_time = self.constant_dataset.time.values 
-        self.constant_values = self.constant_dataset['sia'].values
+        #self.constant_dataset = xr.open_dataset('https://thredds.met.no/thredds/dodsC/osisaf/met.no/ice/index/v2p3/nh/osisaf_nh_sia_monthly.nc')
+        #self.constant_time = self.constant_dataset.time.values 
+        #self.constant_values = self.constant_dataset['sia'].values
 
         self.season_months_widget = pn.Param(self.param.season_months, widgets={'season_months': pn.widgets.CheckBoxGroup})
 
