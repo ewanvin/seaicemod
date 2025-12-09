@@ -305,11 +305,13 @@ class SeaIceAnalysis(param.Parameterized):
                             added_osisaf_legends.add(f'Seasonal OSISAF {season}')
                         
 
+                        line_width = 2 if not self.show_band else 0.1  # Adjust line width based on toggle state
                         # Plot the seasonal MODEL data with the hover tool
                         point = self.figure.line(
                             'date', 'value', source=source,
                             legend_label=f'{model} - {scenario} ({ensemble_member}) {season}',
-                            line_width=2, color=scenario_color, line_dash=line_dash
+                            line_width=line_width,
+                            color=scenario_color, line_dash=line_dash
                         )
 
                         legend_items.append(LegendItem(label=f'{model} - {scenario} ({ensemble_member}) {season}', renderers=[point]))
@@ -319,7 +321,7 @@ class SeaIceAnalysis(param.Parameterized):
                         ###### Statistics ######
                         # Collect data across all ensemble members for this model-scenario combination
                         ensemble_data = []
-                        
+
                         for ensemble_member in self.ensemble_members:
                             # Extract data for the current ensemble member
                             self.data_info = download_and_extract_data(actual_variable, model, 'Monthly', scenario, ensemble_member)
@@ -333,7 +335,7 @@ class SeaIceAnalysis(param.Parameterized):
                             da.coords['year'] = da.time.dt.year
                             da.coords['month'] = da.time.dt.month
                             selected_months_mean = da.sel(time=da.time.dt.month.isin(months)).groupby('year').mean()
-                        
+
                             # Add the ensemble member's mean data to the list
                             ensemble_data.append(selected_months_mean.values)
 
@@ -343,54 +345,55 @@ class SeaIceAnalysis(param.Parameterized):
                             # Shape: (number_of_ensemble_members, number_of_dates)
                             ensemble_array = np.array(ensemble_data)
 
-                            # Calculate the min and max across all ensemble members for each date
+                            # Calculate the min, max, and mean across all ensemble members for each date
                             min_values = np.min(ensemble_array, axis=0)
                             max_values = np.max(ensemble_array, axis=0)
+                            mean_values = np.mean(ensemble_array, axis=0)  # Calculate the mean
 
-                            # Prepare the dates (x-axis) for the band
+                            # Prepare the dates (x-axis) for the band and mean line
                             season_years = selected_months_mean.year.values
                             season_dates = [pd.Timestamp(year=int(year), month=months[0], day=1) for year in season_years]
                             season_dates = pd.to_datetime(season_dates, format='%Y-%m-%d')
 
-                            # Create a ColumnDataSource for the band
+                            # Create a ColumnDataSource for the band (spread)
                             spread_source = ColumnDataSource(data={
                                 'date': season_dates,  # Dates (x-axis)
                                 'lower': min_values,   # Minimum values (lower bound of the band)
                                 'upper': max_values    # Maximum values (upper bound of the band)
                             })
-
-                            # Add the band to the figure if `show_band` is True
+ 
+                            # Add the spread band to the figure if `show_band` is True
                             if self.show_band:
                                 print('Adding Spread Band...')
-                                
-                                # Create the band for the spread
                                 spread_band = Band(
                                     base='date', lower='lower', upper='upper', source=spread_source,
-                                    fill_alpha=0.05, fill_color=scenario_color, line_color='black'
+                                    fill_alpha=0.01,  
+                                    fill_color=scenario_color,  #'navy',
+                                    line_color='black',  
+                                    line_width=1
                                 )
-                                
-                                # Add the band to the figure
-                                self.figure.add_layout(spread_band)
-                                
-                                # Track the band renderers so we can remove them later
-                                self._band_renderers.append(spread_band)
+                                self.figure.add_layout(spread_band)  # Add the band to the plot
+                                self._band_renderers.append(spread_band)  # Track the band renderers
                                 print('Tracked Bands:', self._band_renderers)
 
-                            # Remove the band if `show_band` is False
-                            else:
-                                print('Removing Bands...')
-                                
-                                # Iterate over the tracked bands and remove them from the figure
+                                # Add the mean line to the figure
+                                print('Adding Mean Line...')
+                                self.figure.line(
+                                    season_dates, mean_values, legend_label=f'{model} - {scenario} Mean',
+                                    line_width=5, color='slategray', line_dash='dashed' #scenario_color
+                                )
+
+                            # Remove the band and mean line if `show_band` is False
+                            elif self._band_renderers:
+                                print('Removing Bands and Mean Line...')
                                 for band in self._band_renderers:
                                     try:
                                         self.figure.center.remove(band)
-                                        
-                                    except (AttributeError, ValueError) as e:
-                                        print(f"Error removing band: {e}")
+                                    except (AttributeError, ValueError):
+                                        pass
+
+                                self._band_renderers = []  # Clear the list of tracked bands
                                 
-                                # Clear the list of tracked bands
-                                self._band_renderers = []
-                                print('Tracked Bands After Removal:', self._band_renderers)
                         else:
                             print(f"No ensemble data available for {model}-{scenario}.")
                                                     
