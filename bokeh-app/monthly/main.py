@@ -325,88 +325,117 @@ class SeaIceAnalysis(param.Parameterized):
                         legend_items.append(LegendItem(label=f'{model} - {scenario} ({ensemble_member}) {season}', renderers=[point]))
 
 
-                        
-                        ###### Statistics ######
-                        # Collect data across all ensemble members for this model-scenario combination
-                        ensemble_data = []
 
-                        for ensemble_member in self.ensemble_members:
-                            # Extract data for the current ensemble member
-                            self.data_info = download_and_extract_data(actual_variable, model, 'Monthly', scenario, ensemble_member)
-                            if self.data_info is None:
-                                print(f"Data could not be loaded for {model}, {scenario}, {ensemble_member}.")
-                                continue
 
-                            da = self.data_info['da']
+                        ###### Load and Plot Precomputed Statistics ######
+                        if self.show_band:
+                            # Define the path to the precomputed .nc file
+                            nc_file_path = f"https://thredds.met.no/thredds/dodsC/metusers/steingod/deside/climmodseaice/EnsambleSpread4Visualization/{model}_{scenario}_statistics.nc"
+                            print('nc_file_path:', nc_file_path)
 
-                            # Group by year and selected months, and calculate mean for the current ensemble member
-                            da.coords['year'] = da.time.dt.year
-                            da.coords['month'] = da.time.dt.month
-                            selected_months_mean = da.sel(time=da.time.dt.month.isin(months)).groupby('year').mean()
+                            # Load the .nc file
+                            ds = xr.open_dataset(nc_file_path)
 
-                            # Add the ensemble member's mean data to the list
-                            ensemble_data.append(selected_months_mean.values)
+                            # Extract data from the .nc file
+                            nc_years = ds['year'].values
+                            mean_values = ds['mean'].values
+                            min_values = ds['min'].values
+                            max_values = ds['max'].values
+                            std_values = ds['std'].values
 
-                        # Ensure there is data to process
-                        if len(ensemble_data) > 0:
-                            # Combine all ensemble member data into a single NumPy array
-                            # Shape: (number_of_ensemble_members, number_of_dates)
-                            ensemble_array = np.array(ensemble_data)
+                            # Prepare the dates for plotting
+                            season_dates = [pd.Timestamp(year=int(year), month=1, day=1) for year in nc_years]
 
-                            # Calculate the min, max, and mean across all ensemble members for each date
-                            min_values = np.min(ensemble_array, axis=0)
-                            max_values = np.max(ensemble_array, axis=0)
-                            mean_values = np.mean(ensemble_array, axis=0)  # Calculate the mean
-
-                            # Prepare the dates (x-axis) for the band and mean line
-                            season_years = selected_months_mean.year.values
-                            season_dates = [pd.Timestamp(year=int(year), month=months[0], day=1) for year in season_years]
-                            season_dates = pd.to_datetime(season_dates, format='%Y-%m-%d')
-
-                            # Create a ColumnDataSource for the band (spread)
+                            # Create a ColumnDataSource for the spread band
                             spread_source = ColumnDataSource(data={
-                                'date': season_dates,  # Dates (x-axis)
-                                'lower': min_values,   # Minimum values (lower bound of the band)
-                                'upper': max_values    # Maximum values (upper bound of the band)
+                                'date': season_dates,
+                                'lower': min_values,
+                                'upper': max_values
                             })
- 
-                            # Add the spread band to the figure if `show_band` is True
-                            if self.show_band:
-                                print('Adding Spread Band...')
-                                spread_band = Band(
-                                    base='date', lower='lower', upper='upper', source=spread_source,
-                                    fill_alpha=0.01,  
-                                    fill_color=scenario_color,  #'navy',
-                                    line_color='black',  
-                                    line_width=1
-                                )
-                                self.figure.add_layout(spread_band)  # Add the band to the plot
-                                self._band_renderers.append(spread_band)  # Track the band renderers
-                                print('Tracked Bands:', self._band_renderers)
 
-                                # Add the mean line to the figure
-                                print('Adding Mean Line...')
-                                self.figure.line(
-                                    season_dates, mean_values, legend_label=f'{model} - {scenario} Mean',
-                                    line_width=5, color='slategray', line_dash='dashed' #scenario_color
-                                )
+                            # Add the spread band to the figure
+                            print('Adding Spread Band...')
+                            spread_band = Band(
+                                base='date', lower='lower', upper='upper', source=spread_source,
+                                fill_alpha=0.1,  
+                                fill_color=scenario_color,  
+                                line_color='black',  
+                                line_width=1
+                            )
+                            self.figure.add_layout(spread_band)  # Add the band to the plot
+                            self._band_renderers.append(spread_band)  # Track the band renderers
+                            print('Tracked Bands:', self._band_renderers)
 
-                            # Remove the band and mean line if `show_band` is False
-                            elif self._band_renderers:
-                                print('Removing Bands and Mean Line...')
-                                for band in self._band_renderers:
-                                    try:
-                                        self.figure.center.remove(band)
-                                    except (AttributeError, ValueError):
-                                        pass
+                            
 
-                                self._band_renderers = []  # Clear the list of tracked bands
-                                
-                        else:
-                            print(f"No ensemble data available for {model}-{scenario}.")
-                                                    
-                        
-                        
+                            # Add the standard deviation band (around the mean)
+                            std_source = ColumnDataSource(data={
+                                'date': season_dates,
+                                'lower': mean_values - std_values,
+                                'upper': mean_values + std_values
+                            })
+
+                            std_band = Band(
+                                base='date', lower='lower', upper='upper', source=std_source,
+                                fill_alpha=0.5,  
+                                fill_color='teal',  
+                                line_color=None  
+                            )
+                            self.figure.add_layout(std_band)  # Add the std band to the plot
+                            self._band_renderers.append(std_band)  # Track the band renderers
+                            print('Tracked Bands (with Std):', self._band_renderers)
+
+                            # Add the mean line to the figure
+                            print('Adding Mean Line...')
+                            mean_line_source = ColumnDataSource(data={
+                                'date': season_dates,
+                                'value': mean_values,
+                                'model': [f'{model} - {scenario} Mean'] * len(season_dates)
+                            })
+
+                            mean_line = self.figure.line(
+                                'date', 'value', source=mean_line_source,
+                                legend_label=f'{model} - {scenario} Mean',
+                                line_width=5, color='red', line_dash='dashed' #powderblue
+                            )
+
+                            # Add a hover tool for the mean line
+                            mean_hover_tool = HoverTool(
+                                renderers=[mean_line],
+                                tooltips='''
+                                    <div>
+                                        <div>
+                                            <span style="font-size: 12px; font-weight: bold">Model:</span>
+                                            <span style="font-size: 12px;">@model</span>
+                                        </div>
+                                        <div>
+                                            <span style="font-size: 12px; font-weight: bold">Date:</span>
+                                            <span style="font-size: 12px;">@date{%F}</span>
+                                        </div>
+                                        <div>
+                                            <span style="font-size: 12px; font-weight: bold">Mean Value:</span>
+                                            <span style="font-size: 12px;">@value{0.000}</span>
+                                            <span style="font-size: 12px;">mill. km<sup>2</sup></span>
+                                        </div>
+                                    </div>
+                                ''',
+                                formatters={'@date': 'datetime'},
+                                mode='vline'
+                            )
+                            self.figure.add_tools(mean_hover_tool)  # Add the hover tool to the figure
+
+                        # Remove the band and mean line if `show_band` is False
+                        elif self._band_renderers:
+                            print('Removing Bands and Mean Line...')
+                            for band in self._band_renderers:
+                                try:
+                                    self.figure.center.remove(band)
+                                except (AttributeError, ValueError):
+                                    pass
+
+                            self._band_renderers = []  # Clear the list of tracked bands
+                            print('Tracked Bands After Removal:', self._band_renderers)
+                                             
 
         # Create a new legend with the updated items
         if self.figure.renderers:
