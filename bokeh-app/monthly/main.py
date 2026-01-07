@@ -390,7 +390,7 @@ class SeaIceAnalysis(param.Parameterized):
                             [], [],  # Empty data
                             line_width=1, color=scenario_color
                         )
-                        legend_items.append(LegendItem(label=f'Spread {model_name} {scenario}', renderers=[dummy_line_spread]))
+                        legend_items.append(LegendItem(label=f'Spread {model_name} {scenario} (light)', renderers=[dummy_line_spread]))
                         
 
 
@@ -416,7 +416,7 @@ class SeaIceAnalysis(param.Parameterized):
                             [], [],  # Empty data
                             line_width=1, color=scenario_color
                         )
-                        legend_items.append(LegendItem(label=f'std {model_name} {scenario}', renderers=[dummy_line_std]))
+                        legend_items.append(LegendItem(label=f'std {model_name} {scenario} (dark)', renderers=[dummy_line_std]))
              
                         
         # Create a new legend with the updated items
