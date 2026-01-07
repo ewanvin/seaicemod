@@ -300,7 +300,7 @@ class SeaIceAnalysis(param.Parameterized):
 
                         # Plot the seasonal OSISAF data (only add legend once)
                         if f'Seasonal OSISAF {season}' not in added_osisaf_legends:
-                            osi_point = self.figure.line('date','value', source=source_osi, legend_label=f'OSISAF {season}', line_width=3, color='black', line_dash=line_dash)
+                            osi_point = self.figure.line('date','value', source=source_osi, legend_label=f'OSISAF', line_width=3, color='black', line_dash=line_dash)
                             legend_items.append(LegendItem(label=f'OSISAF {season}', renderers=[osi_point]))
                             added_osisaf_legends.add(f'Seasonal OSISAF {season}')
                         
