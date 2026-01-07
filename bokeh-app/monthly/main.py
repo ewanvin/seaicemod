@@ -93,7 +93,7 @@ class SeaIceAnalysis(param.Parameterized):
         'EC-Earth3-Veg_sea_ice', 
         'CanESM5_sea_ice', 
         'ACCESS-CM2_sea_ice'], 
-        default=['NorESM2-LM_sea_ice'])
+        default=['MRI-ESM2-0_sea_ice'])
     scenarios = param.ListSelector(objects=ssp_scenarios, default=['ssp126'])
 
     # Adding ensemble members
@@ -221,7 +221,8 @@ class SeaIceAnalysis(param.Parameterized):
 
                     # Define season-to-month mapping and line styles for plotting
                     season_to_months = {
-                        'DJF': [12, 1, 2],
+                        #'DJF': [12, 1, 2],
+                        'DJF': [12, 1, 2,3,4,5,6,7,8,9,10,11],
                         'MAM': [3, 4, 5],
                         'JJA': [6, 7, 8],
                         'SON': [9, 10, 11]
@@ -488,9 +489,9 @@ class SeaIceAnalysis(param.Parameterized):
             pn.pane.Markdown("### Scenarios"),
             pn.Param(self.param.scenarios, widgets={'scenarios': pn.widgets.CheckBoxGroup}),
             scenario_tooltip,
-            pn.pane.Markdown("### Season Selector"),
-            pn.Param(self.param.season_months, widgets={'season_months': pn.widgets.CheckBoxGroup}),
-            season_tooltip,    
+            #pn.pane.Markdown("### Season Selector"),
+            #pn.Param(self.param.season_months, widgets={'season_months': pn.widgets.CheckBoxGroup}),
+            #season_tooltip,    
         )
 
         return pn.Row(widget_layout, self.figure)
