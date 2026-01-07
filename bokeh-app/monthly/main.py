@@ -12,7 +12,6 @@ from bokeh.io import show
 from bokeh.models import HoverTool, Paragraph, LegendItem, Legend, DatetimeAxis, CustomJSHover, CustomJS, ColumnDataSource, Band, Button, VArea
 import logging
 import param
-#import toolkit as tk
 from bokeh.palettes import viridis, cividis, plasma, Category10
 from bokeh.colors import RGB
 from bokeh.transform import linear_cmap
@@ -59,7 +58,6 @@ def download_and_extract_data(var_type, model, temp_reso, scenario, ensemble_mem
         return None
 
 
-
 # Generate color palettes with a specific number of colors
 def generate_palette(palette_func, num_colors):
     return palette_func(num_colors)
@@ -84,7 +82,6 @@ variable_mapping = {
     'Sea Ice Extent': 'siextentn'
 } 
 
-
 class SeaIceAnalysis(param.Parameterized):
     color_scale_selector = param.Selector(objects=list(color_groups['Sequential color maps'].keys()) + list(color_groups['Non-sequential color maps'].keys()), default='Viridis')
     variable = param.Selector(objects=list(variable_mapping.keys()), default='Sea Ice Area')
@@ -105,7 +102,6 @@ class SeaIceAnalysis(param.Parameterized):
         default=['r1i1p1f1']
     )
     
-    
     # Add selection of months when selecting Seasonal reso
     season_months = param.ListSelector(objects=['DJF','MAM','JJA','SON'], default=['DJF'])
 
@@ -113,7 +109,6 @@ class SeaIceAnalysis(param.Parameterized):
     show_band = param.Boolean(default=False)  # Parameter to toggle the band visibility
     _band_renderers = [] # Track band renderes added to the figure
     _band = None
-
 
 
     def __init__(self, **params):
@@ -144,11 +139,6 @@ class SeaIceAnalysis(param.Parameterized):
         self.band_toggle_button = pn.widgets.Toggle(name='Show Spread Band', button_type="primary", value=self.show_band)
         self.band_toggle_button.param.watch(self.toggle_band_visibility, 'value')
         
-        # Adding osisaf data
-        #self.constant_dataset = xr.open_dataset('https://thredds.met.no/thredds/dodsC/osisaf/met.no/ice/index/v2p3/nh/osisaf_nh_sia_monthly.nc')
-        #self.constant_time = self.constant_dataset.time.values 
-        #self.constant_values = self.constant_dataset['sia'].values
-
         self.season_months_widget = pn.Param(self.param.season_months, widgets={'season_months': pn.widgets.CheckBoxGroup})
 
         self.update_season_selector_visibility()
@@ -159,7 +149,7 @@ class SeaIceAnalysis(param.Parameterized):
         """
         #Updates the 'show_band' parameter and triggers a re-render of the plot
         #when the toggle button is clicked.
-"""
+        """
         self.show_band = event.new  # Update the show_band parameter
         self.update_plot()  # Re-render the plot 
 
@@ -177,11 +167,7 @@ class SeaIceAnalysis(param.Parameterized):
         if total_combinations > len(self.color_palette):
             self.color_palette = generate_palette(viridis, total_combinations)
     
-
     
-
-
-
     @param.depends('variable', 'models', 'scenarios', 'ensemble_members', 'color_scale_selector', 'season_months', 'show_band', watch=True)
     def update_plot(self):
         # Update the color palette based on the selected color scale
@@ -190,6 +176,21 @@ class SeaIceAnalysis(param.Parameterized):
         # Clear the figure and legend items
         self.figure.renderers = []
         self.figure.legend.items = []
+
+        # Remove bands and mean line if they exist in _band_renderers
+        if self._band_renderers:
+            print('Removing Bands and Mean Line...')
+            for renderer in self._band_renderers[:]:  # Use a copy of the list to avoid modifying it during iteration
+                try:
+                    if renderer in self.figure.center:  
+                        self.figure.center.remove(renderer) 
+                        print(f"Removed renderer: {renderer}")
+                    else:
+                        print(f"Renderer already removed: {renderer}")
+                except (AttributeError, ValueError) as e:
+                    print(f"Error removing renderer: {e}")
+            self._band_renderers.clear()  # Clear the list after removal
+            print('Tracked Bands After Removal:', self._band_renderers)
         
         legend_items = []
         added_osisaf_legends = set()
@@ -201,7 +202,6 @@ class SeaIceAnalysis(param.Parameterized):
         line = self.figure.line(self.constant_time, self.constant_values, legend_label="Osisaf", line_width=2, color="black")
         line.visible = False
         
-
         color_index = 0
         for model_index, model in enumerate(self.models):
             for scenario_index, scenario in enumerate(self.scenarios):
@@ -262,19 +262,11 @@ class SeaIceAnalysis(param.Parameterized):
                         season_dates = [pd.Timestamp(year=int(year), month=months[0], day=1) for year in season_years]
                         season_dates = pd.to_datetime(season_dates, format='%Y-%m-%d')
 
-
                         # Ensure the data is 1D for each season
                         if season_values.ndim > 1 and season_values.shape[1] > 1:
                             season_values = season_values[:, 0]
 
-                
-                        # Create a ColumnDataSource for each line of Model data
-                        source = ColumnDataSource(data={
-                            'date': season_dates,
-                            'value': season_values,
-                            'model': [model] * len(season_dates)  # Model name repeated for each date
-                        })
-
+                        
                         osi_name = 'OSISAF'
                         source_osi = ColumnDataSource(data={
                             'date': osi_season_dates,
@@ -308,135 +300,125 @@ class SeaIceAnalysis(param.Parameterized):
                         # Plot the seasonal OSISAF data (only add legend once)
                         if f'Seasonal OSISAF {season}' not in added_osisaf_legends:
                             osi_point = self.figure.line('date','value', source=source_osi, legend_label=f'OSISAF {season}', line_width=3, color='black', line_dash=line_dash)
-                            #osi_point = self.figure.line(osi_season_dates, osi_season_values, legend_label=f'OSISAF {season}', line_width=3, color='black', line_dash=line_dash)
                             legend_items.append(LegendItem(label=f'OSISAF {season}', renderers=[osi_point]))
                             added_osisaf_legends.add(f'Seasonal OSISAF {season}')
                         
+                        
+                        line_width = 2 if not self.show_band else 0.1  
+                        # Define the path to the precomputed .nc file
+                        nc_file_path = f"https://thredds.met.no/thredds/dodsC/metusers/steingod/deside/climmodseaice/EnsambleSpread4Visualization/{model}_{scenario}_statistics.nc"
+                        
+                        # Load the .nc file
+                        ds = xr.open_dataset(nc_file_path)
 
-                        line_width = 2 if not self.show_band else 0.1  # Adjust line width based on toggle state
-                        # Plot the seasonal MODEL data with the hover tool
-                        point = self.figure.line(
-                            'date', 'value', source=source,
-                            legend_label=f'{model} - {scenario} ({ensemble_member}) {season}',
-                            line_width=line_width,
-                            color=scenario_color, line_dash=line_dash
+                        # Extract data from the .nc file
+                        nc_years = ds['year'].values
+                        mean_values = ds['mean'].values
+                        min_values = ds['min'].values
+                        max_values = ds['max'].values
+                        std_values = ds['std'].values
+
+                        # Prepare the dates for plotting
+                        season_dates = [pd.Timestamp(year=int(year), month=1, day=1) for year in nc_years]
+
+                        # Extract the part of the model name before the first underscore
+                        model_name = model.split('_')[0]    
+
+                        # Add the mean line to the figure
+                        print('Adding Mean Line...')
+                        mean_line_source = ColumnDataSource(data={
+                            'date': season_dates,
+                            'value': mean_values,
+                            'model': [f'{model} - {scenario} Mean'] * len(season_dates)
+                        })
+
+                        mean_line = self.figure.line(
+                            'date', 'value', source=mean_line_source,
+                            legend_label=f'{model} - {scenario} Mean',
+                            line_width=5, color=scenario_color, line_dash='dashed' #powderblue
                         )
 
-                        legend_items.append(LegendItem(label=f'{model} - {scenario} ({ensemble_member}) {season}', renderers=[point]))
-
-
-
-
-                        ###### Load and Plot Precomputed Statistics ######
-                        if self.show_band:
-                            # Define the path to the precomputed .nc file
-                            nc_file_path = f"https://thredds.met.no/thredds/dodsC/metusers/steingod/deside/climmodseaice/EnsambleSpread4Visualization/{model}_{scenario}_statistics.nc"
-                            print('nc_file_path:', nc_file_path)
-
-                            # Load the .nc file
-                            ds = xr.open_dataset(nc_file_path)
-
-                            # Extract data from the .nc file
-                            nc_years = ds['year'].values
-                            mean_values = ds['mean'].values
-                            min_values = ds['min'].values
-                            max_values = ds['max'].values
-                            std_values = ds['std'].values
-
-                            # Prepare the dates for plotting
-                            season_dates = [pd.Timestamp(year=int(year), month=1, day=1) for year in nc_years]
-
-                            # Create a ColumnDataSource for the spread band
-                            spread_source = ColumnDataSource(data={
-                                'date': season_dates,
-                                'lower': min_values,
-                                'upper': max_values
-                            })
-
-                            # Add the spread band to the figure
-                            print('Adding Spread Band...')
-                            spread_band = Band(
-                                base='date', lower='lower', upper='upper', source=spread_source,
-                                fill_alpha=0.1,  
-                                fill_color=scenario_color,  
-                                line_color='black',  
-                                line_width=1
-                            )
-                            self.figure.add_layout(spread_band)  # Add the band to the plot
-                            self._band_renderers.append(spread_band)  # Track the band renderers
-                            print('Tracked Bands:', self._band_renderers)
-
-                            
-
-                            # Add the standard deviation band (around the mean)
-                            std_source = ColumnDataSource(data={
-                                'date': season_dates,
-                                'lower': mean_values - std_values,
-                                'upper': mean_values + std_values
-                            })
-
-                            std_band = Band(
-                                base='date', lower='lower', upper='upper', source=std_source,
-                                fill_alpha=0.5,  
-                                fill_color='teal',  
-                                line_color=None  
-                            )
-                            self.figure.add_layout(std_band)  # Add the std band to the plot
-                            self._band_renderers.append(std_band)  # Track the band renderers
-                            print('Tracked Bands (with Std):', self._band_renderers)
-
-                            # Add the mean line to the figure
-                            print('Adding Mean Line...')
-                            mean_line_source = ColumnDataSource(data={
-                                'date': season_dates,
-                                'value': mean_values,
-                                'model': [f'{model} - {scenario} Mean'] * len(season_dates)
-                            })
-
-                            mean_line = self.figure.line(
-                                'date', 'value', source=mean_line_source,
-                                legend_label=f'{model} - {scenario} Mean',
-                                line_width=5, color='red', line_dash='dashed' #powderblue
-                            )
-
-                            # Add a hover tool for the mean line
-                            mean_hover_tool = HoverTool(
-                                renderers=[mean_line],
-                                tooltips='''
+                        # Add a hover tool for the mean line
+                        mean_hover_tool = HoverTool(
+                            renderers=[mean_line],
+                            tooltips='''
+                                <div>
                                     <div>
-                                        <div>
-                                            <span style="font-size: 12px; font-weight: bold">Model:</span>
-                                            <span style="font-size: 12px;">@model</span>
-                                        </div>
-                                        <div>
-                                            <span style="font-size: 12px; font-weight: bold">Date:</span>
-                                            <span style="font-size: 12px;">@date{%F}</span>
-                                        </div>
-                                        <div>
-                                            <span style="font-size: 12px; font-weight: bold">Mean Value:</span>
-                                            <span style="font-size: 12px;">@value{0.000}</span>
-                                            <span style="font-size: 12px;">mill. km<sup>2</sup></span>
-                                        </div>
+                                        <span style="font-size: 12px; font-weight: bold">Model:</span>
+                                        <span style="font-size: 12px;">@model</span>
                                     </div>
-                                ''',
-                                formatters={'@date': 'datetime'},
-                                mode='vline'
-                            )
-                            self.figure.add_tools(mean_hover_tool)  # Add the hover tool to the figure
+                                    <div>
+                                        <span style="font-size: 12px; font-weight: bold">Date:</span>
+                                        <span style="font-size: 12px;">@date{%F}</span>
+                                    </div>
+                                    <div>
+                                        <span style="font-size: 12px; font-weight: bold">Mean Value:</span>
+                                        <span style="font-size: 12px;">@value{0.000}</span>
+                                        <span style="font-size: 12px;">mill. km<sup>2</sup></span>
+                                    </div>
+                                </div>
+                            ''',
+                            formatters={'@date': 'datetime'},
+                            mode='vline'
+                        )
+                        self.figure.add_tools(mean_hover_tool)
+                        legend_items.append(LegendItem(label=f'Mean {model_name} {scenario}', renderers=[mean_line]))
 
-                        # Remove the band and mean line if `show_band` is False
-                        elif self._band_renderers:
-                            print('Removing Bands and Mean Line...')
-                            for band in self._band_renderers:
-                                try:
-                                    self.figure.center.remove(band)
-                                except (AttributeError, ValueError):
-                                    pass
+                        # Create a ColumnDataSource for the spread band
+                        spread_source = ColumnDataSource(data={
+                            'date': season_dates,
+                            'lower': min_values,
+                            'upper': max_values
+                        })
+                        
+                        # Add the spread band to the figure
+                        print('Adding Spread Band...')                       
+                        spread_band = Band(
+                            base='date', lower='lower', upper='upper', source=spread_source,
+                            fill_alpha=0.1,
+                            fill_color=scenario_color,
+                            line_color='black',
+                            line_width=1
+                        )
+                        
+                        self.figure.add_layout(spread_band)  
+                        self._band_renderers.append(spread_band) 
+                        print('Tracked Bands:', self._band_renderers)
 
-                            self._band_renderers = []  # Clear the list of tracked bands
-                            print('Tracked Bands After Removal:', self._band_renderers)
-                                             
+                        # Add a dummy line for the legend
+                        dummy_line_spread = self.figure.line(
+                            [], [],  # Empty data
+                            line_width=1, color=scenario_color
+                        )
+                        legend_items.append(LegendItem(label=f'Spread {model_name} {scenario}', renderers=[dummy_line_spread]))
+                        
 
+
+                        # Add the standard deviation band (around the mean)
+                        std_source = ColumnDataSource(data={
+                            'date': season_dates,
+                            'lower': mean_values - std_values,
+                            'upper': mean_values + std_values
+                        })
+
+                        std_band = Band(
+                            base='date', lower='lower', upper='upper', source=std_source,
+                            fill_alpha=0.5,  
+                            fill_color=scenario_color,#'teal',  
+                            line_color=None  
+                        )
+                        self.figure.add_layout(std_band)  
+                        self._band_renderers.append(std_band)
+                        print('Tracked Bands (with Std):', self._band_renderers)
+
+                        # Add a dummy line for the legend
+                        dummy_line_std = self.figure.line(
+                            [], [],  # Empty data
+                            line_width=1, color=scenario_color
+                        )
+                        legend_items.append(LegendItem(label=f'std {model_name} {scenario}', renderers=[dummy_line_std]))
+             
+                        
         # Create a new legend with the updated items
         if self.figure.renderers:
             self.figure.legend.items = legend_items
@@ -449,20 +431,16 @@ class SeaIceAnalysis(param.Parameterized):
 
             self.figure.yaxis.axis_label = f'{self.variable} [million km²]'
 
-    
-
     @param.depends('temporal_resolution', watch=True)
     def update_view(self):
         self.view_pane = self.view()
 
-    
     @param.depends('temporal_resolution', watch=True)
     def update_season_selector_visibility(self):
         if self.temporal_resolution == 'Seasonal':
             self.season_months_widget.visible = True
         else:
             self.season_months_widget.visible = False
-
 
     def view(self):
         model_tooltips = {
@@ -490,24 +468,11 @@ class SeaIceAnalysis(param.Parameterized):
             'SON': 'SON: September, October, November'
         }
 
-        
         # Wrap CheckBoxGroup in Tooltip
         model_tooltip = pn.widgets.TooltipIcon(value="\n\n".join([f"{tooltip}" for model, tooltip in model_tooltips.items()])) 
         scenario_tooltip = pn.widgets.TooltipIcon(value="\n\n".join([f"{tooltip}" for model, tooltip in scenario_tooltips.items()])) 
         season_tooltip = pn.widgets.TooltipIcon(value="\n\n".join([f"{tooltip}" for model, tooltip in season_tooltips.items()])) 
         
-
-        # Create the widgets
-        widgets = {
-            'color_scale_selector': pn.widgets.Select,
-            'variable': pn.widgets.Select,
-            'temporal_resolution': pn.widgets.Select,
-            'models': pn.widgets.CheckBoxGroup,
-            'scenarios': pn.widgets.CheckBoxGroup,
-            'season_months': pn.widgets.CheckBoxGroup
-        }
-        
-                
         # Add the widgets and the figure to the layout
         widget_layout = pn.Column(
             pn.pane.Markdown("### Color Scale Selector"),
@@ -523,18 +488,12 @@ class SeaIceAnalysis(param.Parameterized):
             pn.pane.Markdown("### Scenarios"),
             pn.Param(self.param.scenarios, widgets={'scenarios': pn.widgets.CheckBoxGroup}),
             scenario_tooltip,
-            pn.pane.Markdown("### Ensemble Members"),
-            pn.Param(self.param.ensemble_members, widgets={'ensemble_members': pn.widgets.CheckBoxGroup}),  # Add ensemble members widget
             pn.pane.Markdown("### Season Selector"),
             pn.Param(self.param.season_months, widgets={'season_months': pn.widgets.CheckBoxGroup}),
-            season_tooltip,
-            self.band_toggle_button  # Add the toggle button to the widget layout      
+            season_tooltip,    
         )
-
 
         return pn.Row(widget_layout, self.figure)
         
-
 sea_ice_analysis = SeaIceAnalysis()
-#pn.serve(sea_ice_analysis.view, title='Sea Ice Analysis')
 sea_ice_analysis.view().servable(title='Sea Ice Analysis')
