@@ -115,7 +115,9 @@ class SeaIceAnalysis(param.Parameterized):
         super().__init__(**params)
 
         # Load OSISAF data once during initialization
-        self.constant_dataset = xr.open_dataset('https://thredds.met.no/thredds/dodsC/osisaf/met.no/ice/index/v2p3/nh/osisaf_nh_sia_monthly.nc')
+        self.constant_dataset = xr.open_dataset('https://thredds.met.no/thredds/dodsC/osisaf/met.no/ice/index/sii_v3p0/nh/ice_area_nh_sii-v3p0_monthly.nc')
+        # Drop the most recent value so `sia` excludes its final time step.
+        self.constant_dataset = self.constant_dataset.isel(time=slice(None, -1))
         self.constant_time = pd.to_datetime(self.constant_dataset.time.values)
         self.constant_values = self.constant_dataset['sia'].values
 
@@ -246,6 +248,8 @@ class SeaIceAnalysis(param.Parameterized):
                         osisaf.coords['year'] = osisaf.time.dt.year
                         osisaf.coords['month'] = osisaf.time.dt.month
                         osisaf_selected_months_mean = osisaf['sia'].sel(time=osisaf.time.dt.month.isin(months)).groupby('year').mean()
+                        if osisaf_selected_months_mean.sizes.get('year', 0) > 0:
+                            osisaf_selected_months_mean = osisaf_selected_months_mean.isel(year=slice(None, -1))
 
                         # Group by year and selected months, and calculate mean MODEL data
                         da.coords['year'] = da.time.dt.year
